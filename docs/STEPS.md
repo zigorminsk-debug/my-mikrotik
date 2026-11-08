@@ -191,9 +191,30 @@ GOOS=windows (amd64)       → dist/mikrotik-inspector-windows-amd64.exe (MZ)
 используемые действия до актуальных мажорных версий
 (`checkout@v7`, `setup-go@v7`, `upload-artifact@v7`, `action-gh-release@v3`).
 
-### Запуск #2 — после обновления действий
+### Запуск #2 — `42513190476` (push e14a4d6, обновление действий до v7/v3)
 
-См. `gh run list` — запуск инициирован пушем с обновлением workflow.
+| Job | Результат |
+|---|---|
+| Форматирование, vet и тесты | ✅ |
+| Сборка mikrotik-inspector-linux-amd64 | ✅, артефакт |
+| Сборка mikrotik-inspector-windows-amd64.exe | ✅, артефакт |
+
+**Итог:** `success`. Предупреждения об устаревшем Node.js 20 исчезли
+(действия обновлены до `checkout@v7`, `setup-go@v7`, `upload-artifact@v7`).
+
+### Релиз `v0.1.0` — запуск `42513366008` (workflow `Release`)
+
+Пушен тег `v0.1.0` → workflow собрал бинарники и опубликовал GitHub Release:
+
+| Файл | Назначение |
+|---|---|
+| `mikrotik-inspector-v0.1.0-windows-amd64.exe` | готовая Windows-программа |
+| `mikrotik-inspector-v0.1.0-linux-amd64` | Linux-сборка |
+| `SHA256SUMS.txt` | контрольные суммы |
+
+Релиз: https://github.com/zigorminsk-debug/my-mikrotik/releases/tag/v0.1.0
+
+**Итог:** `success` — все шаги «изменения → сборка на GitHub» отработали.
 
 ---
 
