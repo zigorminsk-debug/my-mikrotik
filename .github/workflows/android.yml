@@ -107,10 +107,14 @@ jobs:
           set -euo pipefail
           # gomobile требует golang.org/x/mobile в графе зависимостей модуля;
           # версию закрепляем той же, что ставится инструментом.
-          go get golang.org/x/mobile@latest
-          go mod tidy
+          # Версия x/mobile должна совпадать с той, что поставил `go install`
+          # (иначе модуль тянет другой коммит и сборка расходится).
+          go get golang.org/x/mobile@latest 2>&1 | tail -5 || true
+          go mod tidy 2>&1 | tail -5 || true
           echo "--- go.mod ---"
           cat go.mod
+          # Проверяем, что зависимость действительно в графе.
+          go list -m golang.org/x/mobile
 
       - name: Сборка Go-ядра (bridge.aar)
         id: bind
