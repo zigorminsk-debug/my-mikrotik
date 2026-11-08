@@ -194,12 +194,13 @@ jobs:
           echo "--- содержимое app/libs ---"
           ls -lh app/libs/ 2>/dev/null || echo "app/libs пуст"
           if [ -f app/libs/bridge.aar ]; then
-            echo "--- aar: файлы ---"
-            unzip -l app/libs/bridge.aar | head -20
-            echo "--- aar: классы ---"
-            ( mkdir -p /tmp/aarx && cd /tmp/aarx && unzip -o -q "$GITHUB_WORKSPACE/android/app/libs/bridge.aar" classes.jar 2>/dev/null && unzip -l classes.jar | grep -iE "\.class" | head -20 ) || true
+            echo "::warning::AAR| размер: $(stat -c%s app/libs/bridge.aar) байт"
+            unzip -l app/libs/bridge.aar | head -20 | while IFS= read -r line; do echo "::warning::AAR| $line"; done
+            mkdir -p /tmp/aarx
+            ( cd /tmp/aarx && unzip -o -q "$GITHUB_WORKSPACE/android/app/libs/bridge.aar" classes.jar && unzip -l classes.jar | grep -iE "\.class|\$" | head -25 ) | while IFS= read -r line; do echo "::warning::AARCLASS| ${line:0:900}"; done
+          else
+            echo "::warning::AAR| bridge.aar не найден"
           fi
-          # Предупреждения видны через API аннотаций даже без доступа к журналу.
           if grep -q "GRADLE_FAILED" /tmp/gradle.log; then
             echo "::warning::Gradle завершился с ошибкой"
             grep -n -i -E "error|fail|what went wrong|could not|exception|unresolved|Caused by" /tmp/gradle.log \
