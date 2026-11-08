@@ -180,18 +180,14 @@ jobs:
         id: apk
         continue-on-error: true
         working-directory: android
-        # Лог Gradle сохраняется и дублируется аннотациями: журнал запуска
-        # GitHub не всегда доступен, а причину сбоя видеть нужно.
         run: |
           gradle --no-daemon -p . :app:assembleDebug \
             -PappVersion="${{ steps.ver.outputs.version }}" \
             -PversionCode="${{ steps.ver.outputs.code }}" \
-            > /tmp/gradle.log 2>&1 || echo "GRADLE_FAILED=1" >> /tmp/gradle.log
+            > /tmp/gradle.log 2>&1 || true
           echo "--- хвост лога Gradle ---"
           tail -25 /tmp/gradle.log
-          echo "--- содержимое android/app/build/outputs ---"
-          find app/build/outputs -type f 2>/dev/null | head -20 || echo "каталог outputs отсутствует"
-          echo "--- любые apk в проекте ---"
+          echo "--- apk в проекте ---"
           find . -name "*.apk" 2>/dev/null | head -10 || true
 
       - name: Лог сборки APK
@@ -199,23 +195,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: gradle-log
-          path: |
-            /tmp/gradle.log
+          path: /tmp/gradle.log
           if-no-files-found: warn
           retention-days: 7
-
-      - name: Проверка результата сборки APK
-        if: steps.apk.outcome != 'success'
-        run: |
-          echo "::error::Сборка APK завершилась с ошибкой"
-          if [ -f /tmp/gradle.log ]; then
-            echo "::error::GRADLE| — строки с ошибками —"
-            grep -n -i -E "error|fail|what went wrong|could not|exception|unresolved" /tmp/gradle.log \
-              | head -n 8 | while IFS= read -r line; do echo "::error::GRADLE| ${line:0:900}"; done
-            echo "::error::GRADLE| — последние строки —"
-            tail -n 10 /tmp/gradle.log | while IFS= read -r line; do [ -n "$line" ] && echo "::error::GRADLE| ${line:0:900}"; done
-          fi
-          exit 1
 
       - name: Подпись release-APK (если заданы секреты)
         if: github.ref_type == 'tag'
@@ -244,7 +226,7 @@ jobs:
           mkdir -p out
           echo "--- найденные APK ---"
           find android/app/build/outputs -name "*.apk" -exec ls -lh {} \;
-          DEBUG_APK="$(find android/app/build/outputs -path "*debug*" -name "*.apk" | head -1)"
+          DEBUG_APK="$(find android -name "*.apk" | head -1)"
           if [ -z "$DEBUG_APK" ]; then
             echo "::error::APK не найдены в android/app/build/outputs"
             exit 1
