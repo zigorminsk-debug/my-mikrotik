@@ -670,3 +670,41 @@ func TestGenerate_NormalizesIPBeforeValidation(t *testing.T) {
 		t.Errorf("входные данные изменены: %q", s.LAN.Address)
 	}
 }
+
+// Объединённый пакет routeros: все разделы доступны, Wi-Fi — если есть радио
+// и интерфейс (типичный RouterOS 7 вида «routeros»).
+func TestAnalyzeFeatures_CombinedPackage(t *testing.T) {
+	dev := deviceWith("routeros")
+	ifaces := []Iface{{Name: "ether1", Type: "ethernet"}, {Name: "wifi1", Type: "wifi"}}
+	feats := AnalyzeFeatures(dev, ifaces)
+	for _, id := range []string{featLAN, featDHCP, featDNS, featNTP, featPPPoE, featWiFi} {
+		f := featureByID(t, feats, id)
+		if !f.Available {
+			t.Errorf("раздел %s должен быть доступен при пакете routeros (reason=%q)", id, f.Reason)
+		}
+	}
+	if m := featureByID(t, feats, featWiFi).Mode; m != "wave2" {
+		t.Errorf("режим Wi-Fi = %q, ожидался wave2", m)
+	}
+}
+
+func TestAnalyzeFeatures_CombinedWithoutRadio(t *testing.T) {
+	dev := deviceWith("routeros")
+	feats := AnalyzeFeatures(dev, []Iface{{Name: "ether1", Type: "ethernet"}})
+	w := featureByID(t, feats, featWiFi)
+	if w.Available {
+		t.Fatal("без беспроводных интерфейсов Wi-Fi должен быть недоступен")
+	}
+	if !strings.Contains(w.Reason, "нет беспроводных интерфейсов") {
+		t.Errorf("reason = %q", w.Reason)
+	}
+}
+
+func TestAnalyzeFeatures_WifiQcom(t *testing.T) {
+	dev := deviceWith("system", "wifi-qcom")
+	feats := AnalyzeFeatures(dev, []Iface{{Name: "wifi1", Type: "wifi"}})
+	w := featureByID(t, feats, featWiFi)
+	if !w.Available || w.Mode != "wave2" || w.Package != "wifi-qcom" {
+		t.Errorf("wifi = %+v", w)
+	}
+}

@@ -143,6 +143,29 @@ func packageSet(device *Info) map[string]bool {
 	return set
 }
 
+// isCombinedPackage сообщает, что установлен объединённый пакет
+// (routeros, routeros-arm, routeros-mmips …), внутри которого есть
+// system, dhcp, ppp, wireless и остальные «классические» компоненты.
+func isCombinedPackage(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	return name == "routeros" || strings.HasPrefix(name, "routeros-")
+}
+
+// hasWiFiPackage: пакет с поддержкой беспроводных интерфейсов.
+// RouterOS 6 — wireless; RouterOS 7 — wifiwave2 / wifi-qcom / wifi-qcom-ac / wifi;
+// объединённый routeros содержит поддержку для моделей с радио.
+func hasWiFiPackage(pkgs map[string]bool, combined bool) (bool, string) {
+	if combined {
+		return true, "routeros"
+	}
+	for _, name := range []string{"wifiwave2", "wifi-qcom-ac", "wifi-qcom", "wifi", "wireless"} {
+		if pkgs[name] {
+			return true, name
+		}
+	}
+	return false, ""
+}
+
 func hasAnyIface(ifaces []Iface, pred func(Iface) bool) bool {
 	for _, i := range ifaces {
 		if pred(i) {
@@ -167,48 +190,55 @@ func IsWiFiIface(i Iface) bool {
 func AnalyzeFeatures(device *Info, ifaces []Iface) []FeatureInfo {
 	pkgs := packageSet(device)
 
-	wifiPkg := ""
-	switch {
-	case pkgs["wifiwave2"]:
-		wifiPkg = "wifiwave2"
-	case pkgs["wireless"]:
-		wifiPkg = "wireless"
+	// Объединённый пакет routeros (типично для RouterOS 7 и комбинированных
+	// сборок RouterOS 6) содержит system, dhcp, ppp и поддержку радио.
+	combined := false
+	for name := range pkgs {
+		if isCombinedPackage(name) {
+			combined = true
+		}
 	}
+	has := func(pkg string) bool { return pkgs[pkg] || combined }
+	wifiPkgOK, _ := hasWiFiPackage(pkgs, combined)
 	wifiIface := hasAnyIface(ifaces, IsWiFiIface)
 
 	features := []FeatureInfo{
 		{ID: featLAN, Title: "Адреса и подсеть", Path: "/ip address",
-			Package: "system", Available: pkgs["system"] || device == nil,
-			Reason: reasonIf(!pkgs["system"] && device != nil, "system")},
+			Package: "system", Available: has("system") || device == nil,
+			Reason: reasonIf(!has("system") && device != nil, "system")},
 		{ID: featDHCP, Title: "DHCP-сервер", Path: "/ip dhcp-server",
-			Package: "dhcp", Available: pkgs["dhcp"],
-			Reason: reasonIf(!pkgs["dhcp"], "dhcp")},
+			Package: "dhcp", Available: has("dhcp"),
+			Reason: reasonIf(!has("dhcp"), "dhcp")},
 		{ID: featDNS, Title: "DNS", Path: "/ip dns",
-			Package: "system", Available: pkgs["system"] || device == nil,
-			Reason: reasonIf(!pkgs["system"] && device != nil, "system")},
+			Package: "system", Available: has("system") || device == nil,
+			Reason: reasonIf(!has("system") && device != nil, "system")},
 		{ID: featNTP, Title: "NTP-клиент", Path: "/system ntp client",
-			Package: "system", Available: pkgs["system"] || device == nil,
-			Reason: reasonIf(!pkgs["system"] && device != nil, "system")},
+			Package: "system", Available: has("system") || device == nil,
+			Reason: reasonIf(!has("system") && device != nil, "system")},
 		{ID: featPPPoE, Title: "PPPoE-клиент (Интернет)", Path: "/interface pppoe-client",
-			Package: "ppp", Available: pkgs["ppp"],
-			Reason: reasonIf(!pkgs["ppp"], "ppp")},
+			Package: "ppp", Available: has("ppp"),
+			Reason: reasonIf(!has("ppp"), "ppp")},
 	}
 
 	wifi := FeatureInfo{
 		ID: featWiFi, Title: "Wi-Fi", Path: "/interface wireless",
-		Available: wifiPkg != "" && wifiIface,
+		Available: wifiPkgOK && wifiIface,
+	}
+	pkgName := ""
+	if wifiPkgOK {
+		_, pkgName = hasWiFiPackage(pkgs, combined)
 	}
 	switch {
-	case wifiPkg == "":
+	case !wifiPkgOK:
 		wifi.Package = "wireless/wifiwave2"
 		wifi.Reason = "необходимый пакет отсутствует: wireless/wifiwave2"
 	case !wifiIface:
-		wifi.Package = wifiPkg
+		wifi.Package = pkgName
 		wifi.Reason = "на устройстве нет беспроводных интерфейсов"
 	default:
-		wifi.Package = wifiPkg
+		wifi.Package = pkgName
 		// Режим выбирается по типу интерфейса, затем по пакету.
-		wifi.Mode = wifiModeFor(device, ifaces, wifiPkg)
+		wifi.Mode = wifiModeFor(device, ifaces, pkgName)
 	}
 	features = append(features, wifi)
 	return features
@@ -235,7 +265,8 @@ func wifiModeFor(device *Info, ifaces []Iface, pkg string) string {
 			return "legacy"
 		}
 	}
-	if pkg == "wifiwave2" {
+	switch pkg {
+	case "wifiwave2", "wifi-qcom", "wifi-qcom-ac", "wifi":
 		return "wave2"
 	}
 	return "legacy"

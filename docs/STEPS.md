@@ -256,6 +256,14 @@ GOOS=windows (amd64)       → dist/mikrotik-inspector-windows-amd64.exe (MZ)
 - Wi-Fi: для wave2 — `/interface wifi configuration add name=mti-wifi …` и привязка
   к интерфейсу; для legacy — `/interface wireless set <iface> mode=ap authentication-types=wpa2-psk`.
 
+> **Корректировка после первого прогона CI.** Первая версия проверяла только точные
+> имена пакетов (`system`, `dhcp`, `ppp`). На практике в RouterOS 7 и в комбинированных
+> сборках RouterOS 6 установлен один пакет `routeros` (или `routeros-arm`, `routeros-mmips`),
+> внутри которого уже есть system/dhcp/ppp и поддержка радио. Иначе конструктор
+> ошибочно блокировал бы почти все разделы. Добавлены `isCombinedPackage` и
+> `hasWiFiPackage` (`wifiwave2`, `wifi-qcom`, `wifi-qcom-ac`, `wifi`, `wireless`),
+> а также три теста на этот случай.
+
 ## Шаг 3. `mikrotik/iface.go` и `mikrotik/apply.go`
 
 - `CollectInterfaces` — API `/interface/print` или REST `GET /rest/interface`
@@ -295,10 +303,10 @@ GOOS=windows (amd64)       → dist/mikrotik-inspector-windows-amd64.exe (MZ)
 
 ## Шаг 6. Тесты и проверка
 
-Добавлено 16 тестов конструктора (`mikrotik/config_test.go`), всего в проекте 30:
+Добавлено 19 тестов конструктора (`mikrotik/config_test.go`), всего в проекте 34:
 расчёт подсети (`/24`, `/30`, `/32`, IPv6, мусор), доступность разделов (DHCP, PPPoE,
-Wi-Fi legacy/wave2, «пакет есть — интерфейсов нет»), генерация скрипта для обоих режимов
-Wi-Fi, пропуск недоступного раздела, шесть случаев ошибок валидации, приведение IP
+Wi-Fi legacy/wave2, «пакет есть — интерфейсов нет», объединённый пакет `routeros`,
+`wifi-qcom`), генерация скрипта для обоих режимов Wi-Fi, пропуск недоступного раздела, шесть случаев ошибок валидации, приведение IP
 (`NormalizeAddr` и внутри `Generate`), экранирование значений, чтение интерфейсов по API
 и REST, применение скрипта по API (порядок remove → add → run) и по REST.
 
