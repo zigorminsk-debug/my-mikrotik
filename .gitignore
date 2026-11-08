@@ -8,3 +8,14 @@
 .DS_Store
 .idea/
 .vscode/
+
+# Android
+/android/app/libs/*.aar
+/android/app/build/
+/android/build/
+/android/.gradle/
+/android/local.properties
+*.apk
+*.aab
+*.keystore
+*.jks

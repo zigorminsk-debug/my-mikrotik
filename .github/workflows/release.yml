@@ -50,3 +50,6 @@ jobs:
 
             Windows: скачайте `mikrotik-inspector-${{ steps.ver.outputs.version }}-windows-amd64.exe`,
             запустите двойным щелчком — откроется HTML-интерфейс в браузере.
+
+            Android APK собирается отдельным workflow (`Android APK`) и добавляется
+            в этот же релиз: `mikrotik-inspector-<версия>-android.apk`.

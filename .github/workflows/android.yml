@@ -1,0 +1,141 @@
+name: Android APK
+
+# Сборка Android-приложения (APK) — вручную или при пуше тега v*.
+#
+# Почему отдельный workflow: APK требует Android SDK, JDK и gomobile,
+# которых нет в обычной среде разработки. На GitHub-раннере ubuntu-latest
+# Android SDK и JDK 17 предустановлены, поэтому сборка воспроизводима.
+#
+# Этапы:
+#   1. gomobile bind — Go-ядро (HTTP-сервер + RouterOS API/REST) в bridge.aar;
+#   2. Gradle — Java-обвязка с WebView + AAR → app-debug.apk;
+#   3. (для тега) подпись release-ключами из секретов, если они заданы;
+#   4. публикация APK в артефактах и в GitHub Release.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # нужно для загрузки APK в GitHub Release
+
+jobs:
+  apk:
+    name: Сборка APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Настройка Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Настройка JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Установка gomobile и gobind
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Версия приложения
+        id: ver
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            V="${GITHUB_REF_NAME#v}"
+          else
+            V="0.3.0-dev.${GITHUB_RUN_NUMBER}"
+          fi
+          CODE="${GITHUB_RUN_NUMBER}"
+          echo "version=${V}" >> "$GITHUB_OUTPUT"
+          echo "code=${CODE}" >> "$GITHUB_OUTPUT"
+          echo "Собираем версию ${V} (versionCode ${CODE})"
+
+      - name: Сборка Go-ядра (bridge.aar)
+        working-directory: android
+        run: |
+          set -euo pipefail
+          gomobile init
+          mkdir -p app/libs
+          gomobile bind \
+            -target=android \
+            -androidapi 21 \
+            -ldflags "-s -w -X github.com/zigorminsk-debug/my-mikrotik/android/bridge.version=${{ steps.ver.outputs.version }}" \
+            -o app/libs/bridge.aar \
+            ./bridge
+          ls -lh app/libs/
+
+      - name: Сборка APK (Gradle)
+        working-directory: android
+        run: |
+          set -euo pipefail
+          gradle --no-daemon -p . :app:assembleDebug \
+            -PappVersion="${{ steps.ver.outputs.version }}" \
+            -PversionCode="${{ steps.ver.outputs.code }}"
+          find app/build/outputs -name "*.apk" -exec ls -lh {} \;
+
+      - name: Подпись release-APK (если заданы секреты)
+        if: github.ref_type == 'tag'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        working-directory: android
+        run: |
+          set -euo pipefail
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "Секреты подписи не заданы — релизный APK собираться не будет."
+            exit 0
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > /tmp/release.keystore
+          export ANDROID_KEYSTORE_PATH=/tmp/release.keystore
+          gradle --no-daemon -p . :app:assembleRelease \
+            -PappVersion="${{ steps.ver.outputs.version }}" \
+            -PversionCode="${{ steps.ver.outputs.code }}"
+
+      - name: Переименование APK
+        run: |
+          set -euo pipefail
+          V="${{ steps.ver.outputs.version }}"
+          mkdir -p out
+          cp android/app/build/outputs/apk/debug/app-debug.apk \
+             "out/mikrotik-inspector-${V}-android.apk" || true
+          if [ -f android/app/build/outputs/apk/release/app-release.apk ]; then
+            cp android/app/build/outputs/apk/release/app-release.apk \
+               "out/mikrotik-inspector-${V}-android-release.apk"
+          fi
+          cd out && sha256sum * > SHA256SUMS-android.txt && cd ..
+          ls -lh out/
+
+      - name: Загрузка APK как артефакта
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-apk
+          path: out/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Публикация APK в Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v3
+        with:
+          files: out/*
+          tag_name: ${{ github.ref_name }}
+          body: |
+            **MikroTik Inspector ${{ steps.ver.outputs.version }}**
+
+            Android: скачайте `mikrotik-inspector-${{ steps.ver.outputs.version }}-android.apk`
+            и установите на телефон (разрешите установку из неизвестных источников).
+            Приложение не требует root и не использует интернет-сервисы — данные идут
+            напрямую на роутер по вашей локальной сети.

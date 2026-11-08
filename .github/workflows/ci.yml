@@ -41,6 +41,28 @@ jobs:
       - name: go test (-race)
         run: go test -race -count=1 ./...
 
+  android:
+    name: Проверка Android-кода
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Настройка Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: gofmt, vet и сборка bridge под Android
+        working-directory: android
+        run: |
+          gofmt -l . | tee /tmp/fmt.txt
+          test ! -s /tmp/fmt.txt
+          go vet ./...
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build ./bridge
+          CGO_ENABLED=0 GOOS=android GOARCH=arm go build ./bridge
+
   build:
     name: Сборка ${{ matrix.artifact }}
     needs: test

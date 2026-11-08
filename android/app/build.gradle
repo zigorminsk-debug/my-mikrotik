@@ -1,0 +1,64 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Версия приходит из CI/локальной сборки: -PappVersion=0.3.0 -PversionCode=3
+def appVersion = project.findProperty('appVersion') ?: 'dev'
+def appVersionCode = (project.findProperty('versionCode') ?: '1').toInteger()
+
+android {
+    namespace 'com.mikrotik.inspector'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.mikrotik.inspector'
+        minSdk 21
+        targetSdk 34
+        versionCode appVersionCode
+        versionName appVersion
+    }
+
+    buildTypes {
+        debug {
+            // Для подписи debug-сборки используется стандартный отладочный ключ,
+            // чтобы APK можно было установить на телефон.
+            signingConfig signingConfigs.debug
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // Подпись: из CI передаются keystore и пароли (см. .github/workflows/android.yml).
+            // Если их нет — APK соберётся неподписанным (gradle выдаст предупреждение).
+            if (System.getenv('ANDROID_KEYSTORE_PATH')) {
+                signingConfig signingConfigs.create('ci') {
+                    storeFile file(System.getenv('ANDROID_KEYSTORE_PATH'))
+                    storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                    keyAlias System.getenv('ANDROID_KEY_ALIAS') ?: 'mikrotik'
+                    keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+                }
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    packagingOptions {
+        jniLibs {
+            // Go-библиотека собирается для всех поддерживаемых ABI.
+            useLegacyPackaging = false
+        }
+    }
+
+    lint {
+        abortOnError false
+    }
+}
+
+dependencies {
+    // bridge.aar — привязки к Go-ядру, собираются командой:
+    //   gomobile bind -target=android -androidapi 21 -o app/libs/bridge.aar <модуль>/bridge
+    implementation fileTree(dir: 'libs', include: ['*.aar', '*.jar'])
+}
