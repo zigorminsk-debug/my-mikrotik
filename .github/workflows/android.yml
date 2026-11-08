@@ -1,22 +1,21 @@
 name: Android APK
 
-# Сборка Android-приложения (APK) — вручную или при пуше тега v*.
+# Сборка Android-приложения (APK).
 #
-# Почему отдельный workflow: APK требует Android SDK, JDK и gomobile,
-# которых нет в обычной среде разработки. На GitHub-раннере ubuntu-latest
-# Android SDK и JDK 17 предустановлены, поэтому сборка воспроизводима.
+# Почему сборка идёт на GitHub, а не локально: APK требует Android SDK, NDK,
+# JDK и gomobile. На раннере ubuntu-latest SDK и JDK 17 предустановлены, поэтому
+# сборка воспроизводима, а в репозитории не нужны ни инструменты, ни бинарники.
 #
 # Этапы:
 #   1. gomobile bind — Go-ядро (HTTP-сервер + RouterOS API/REST) в bridge.aar;
 #   2. Gradle — Java-обвязка с WebView + AAR → app-debug.apk;
-#   3. (для тега) подпись release-ключами из секретов, если они заданы;
-#   4. публикация APK в артефактах и в GitHub Release.
+#   3. для тега: подпись release-ключами из секретов (если заданы);
+#   4. публикация APK в артефактах запуска и в GitHub Release.
 on:
   workflow_dispatch:
   push:
     tags: ["v*"]
-    # APK собирается при изменениях в Android-части, ядре и интерфейсе,
-    # то есть сразу после внесения правок, а не только по тегу.
+    # APK собирается сразу после изменений в Android-части, ядре и интерфейсе.
     branches: ["**"]
     paths:
       - "android/**"
@@ -33,6 +32,8 @@ jobs:
   apk:
     name: Сборка APK
     runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: "26.1.10909125"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -51,35 +52,27 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Установка Android SDK/NDK
+      - name: Установка Android SDK и NDK
         run: |
           set -euo pipefail
           SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
           echo "Android SDK: $SDK"
-          if [ ! -d "$SDK" ]; then
-            echo "::error::Android SDK не найден в $SDK"
-            exit 1
-          fi
           SDKMGR=""
           for candidate in "$SDK/cmdline-tools/latest/bin/sdkmanager" "$SDK/cmdline-tools/bin/sdkmanager" "$SDK/tools/bin/sdkmanager"; do
             if [ -x "$candidate" ]; then SDKMGR="$candidate"; break; fi
           done
           if [ -z "$SDKMGR" ]; then
-            echo "::error::sdkmanager не найден"
-            find "$SDK" -maxdepth 3 -name "sdkmanager" 2>/dev/null | head
+            echo "::error::sdkmanager не найден в $SDK"
             exit 1
           fi
-          NDK_VERSION="26.1.10909125"
+          # NDK нужен gomobile: он собирает libgojni.so для каждой ABI.
           "$SDKMGR" --install "platforms;android-34" "build-tools;34.0.0" "ndk;${NDK_VERSION}" > /tmp/sdkmanager.log 2>&1 || {
             tail -40 /tmp/sdkmanager.log
             exit 1
           }
-          tail -5 /tmp/sdkmanager.log
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$SDK/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
-          echo "NDK: $SDK/ndk/${NDK_VERSION}"
-          ls "$SDK/ndk/${NDK_VERSION}" | head -5
 
       - name: Установка gomobile и gobind
         run: |
@@ -96,127 +89,53 @@ jobs:
           else
             V="0.3.0-dev.${GITHUB_RUN_NUMBER}"
           fi
-          CODE="${GITHUB_RUN_NUMBER}"
           echo "version=${V}" >> "$GITHUB_OUTPUT"
-          echo "code=${CODE}" >> "$GITHUB_OUTPUT"
-          echo "Собираем версию ${V} (versionCode ${CODE})"
+          echo "code=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "Версия ${V}, versionCode ${GITHUB_RUN_NUMBER}"
 
       - name: Зависимости для gomobile
         working-directory: android
         # gomobile bind требует golang.org/x/mobile в графе зависимостей модуля.
-        # Файл tools.go (тег tools) удерживает зависимость при go mod tidy,
+        # Файл android/tools.go (тег tools) удерживает зависимость при go mod tidy,
         # иначе tidy удаляет её как неиспользуемую.
         run: |
           set -euo pipefail
           go get golang.org/x/mobile@latest
           go mod tidy
-          echo "--- go.mod ---"
-          cat go.mod
-          echo "--- зависимость в графе ---"
           go list -m golang.org/x/mobile
-          echo "--- go.sum (первые строки) ---"
-          head -5 go.sum
 
       - name: Сборка Go-ядра (bridge.aar)
-        id: bind
-        # Лог пишется в файл и выгружается артефактом: так ошибку видно
-        # даже если GitHub не отдаёт журнал запуска.
-        continue-on-error: true
         working-directory: android
         run: |
-          {
-            echo "== окружение =="
-            go version
-            echo "gomobile: $(command -v gomobile || echo нет)"
-            echo "ANDROID_HOME=${ANDROID_HOME:-} ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-} NDK=${ANDROID_NDK_HOME:-}"
-            go env GOPATH GOFLAGS GOPROXY
-            echo "== gomobile init =="
-            gomobile init -v
-            echo "== gomobile bind =="
-            mkdir -p app/libs
-            gomobile bind -v \
-              -target=android/arm,android/arm64,android/amd64 \
-              -androidapi 21 \
-              -javapkg=com.mikrotik.inspector \
-              -ldflags "-s -w -X github.com/zigorminsk-debug/my-mikrotik/android/bridge.version=${{ steps.ver.outputs.version }}" \
-              -o app/libs/bridge.aar \
-              github.com/zigorminsk-debug/my-mikrotik/android/bridge
-            echo "== результат =="
-            ls -lh app/libs/
-            echo "== размер aar =="
-            ls -lh app/libs/bridge.aar
-          } > /tmp/bind.log 2>&1
-          status=$?
-          tail -60 /tmp/bind.log
-          exit $status
-
-      - name: Лог сборки ядра
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: bind-log
-          path: /tmp/bind.log
-          if-no-files-found: warn
-          retention-days: 7
-
-      - name: Проверка результата сборки ядра
-        if: steps.bind.outcome != 'success'
-        run: |
-          # Аннотации доступны через API GitHub, поэтому хвост лога дублируем
-          # в виде ::error:: строк — это позволяет увидеть причину сбоя без
-          # скачивания артефактов.
-          echo "::error::Сборка Go-ядра завершилась с ошибкой"
-          if [ -f /tmp/bind.log ]; then
-            echo "::error::BIND| --- строки с ошибками ---"
-            grep -n -i -E "error|fail|cannot|no usable|unknown flag|missing|not found|no such" /tmp/bind.log \
-              | head -n 12 | while IFS= read -r line; do
-                echo "::error::BIND| ${line:0:900}"
-              done
-            echo "::error::BIND| --- последние строки ---"
-            tail -n 12 /tmp/bind.log | while IFS= read -r line; do
-              [ -n "$line" ] && echo "::error::BIND| ${line:0:900}"
-            done
-          fi
-          exit 1
+          set -euo pipefail
+          gomobile init
+          mkdir -p app/libs
+          # -javapkg задаёт Java-пакет классов, иначе gomobile кладёт их в
+          # пакет с именем Go-пакета («bridge»), и Java-код их не находит.
+          gomobile bind \
+            -target=android/arm,android/arm64,android/amd64 \
+            -androidapi 21 \
+            -javapkg=com.mikrotik.inspector \
+            -ldflags "-s -w -X github.com/zigorminsk-debug/my-mikrotik/android/bridge.version=${{ steps.ver.outputs.version }}" \
+            -o app/libs/bridge.aar \
+            github.com/zigorminsk-debug/my-mikrotik/android/bridge
+          ls -lh app/libs/
 
       - name: Сборка APK (Gradle)
-        id: apk
-        continue-on-error: true
         working-directory: android
         run: |
+          set -euo pipefail
           gradle --no-daemon -p . :app:assembleDebug \
             -PappVersion="${{ steps.ver.outputs.version }}" \
             -PversionCode="${{ steps.ver.outputs.code }}" \
-            > /tmp/gradle.log 2>&1 || echo "GRADLE_FAILED=1" >> /tmp/gradle.log
-          echo "--- хвост лога Gradle ---"
-          tail -25 /tmp/gradle.log
-          echo "--- apk в проекте ---"
-          find . -name "*.apk" 2>/dev/null | head -10 || true
-          echo "--- содержимое app/libs ---"
-          ls -lh app/libs/ 2>/dev/null || echo "app/libs пуст"
-          if [ -f app/libs/bridge.aar ]; then
-            echo "::warning::AAR| размер: $(stat -c%s app/libs/bridge.aar) байт"
-            unzip -l app/libs/bridge.aar | head -20 | while IFS= read -r line; do echo "::warning::AAR| $line"; done
-            mkdir -p /tmp/aarx
-            ( cd /tmp/aarx && unzip -o -q "$GITHUB_WORKSPACE/android/app/libs/bridge.aar" classes.jar && unzip -l classes.jar | grep -iE "\.class|\$" | head -25 ) | while IFS= read -r line; do echo "::warning::AARCLASS| ${line:0:900}"; done
-          else
-            echo "::warning::AAR| bridge.aar не найден"
-          fi
-          if grep -q "GRADLE_FAILED" /tmp/gradle.log; then
-            echo "::warning::Gradle завершился с ошибкой"
-            grep -n -i -E "error|fail|what went wrong|could not|exception|unresolved|Caused by" /tmp/gradle.log \
-              | head -n 10 | while IFS= read -r line; do echo "::warning::GRADLE| ${line:0:900}"; done
-            tail -n 12 /tmp/gradle.log | while IFS= read -r line; do [ -n "$line" ] && echo "::warning::GRADLE| ${line:0:900}"; done
-          fi
-
-      - name: Лог сборки APK
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: gradle-log
-          path: /tmp/gradle.log
-          if-no-files-found: warn
-          retention-days: 7
+            > /tmp/gradle.log 2>&1 || {
+              tail -30 /tmp/gradle.log
+              grep -n -i -E "error|what went wrong|could not|unresolved|Caused by" /tmp/gradle.log | head -10 \
+                | while IFS= read -r line; do echo "::error::GRADLE| ${line:0:900}"; done
+              exit 1
+            }
+          tail -8 /tmp/gradle.log
+          find app/build/outputs -name "*.apk" -exec ls -lh {} \;
 
       - name: Подпись release-APK (если заданы секреты)
         if: github.ref_type == 'tag'
@@ -229,7 +148,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
-            echo "Секреты подписи не заданы — релизный APK собираться не будет."
+            echo "Секреты подписи не заданы — публикуется debug-APK (устанавливается на телефон)."
             exit 0
           fi
           echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > /tmp/release.keystore
@@ -243,12 +162,9 @@ jobs:
           set -euo pipefail
           V="${{ steps.ver.outputs.version }}"
           mkdir -p out
-          echo "--- apk в рабочем каталоге ---"
-          find . -name "*.apk" 2>/dev/null | head -10 || true
           DEBUG_APK="$(find android -name "*.apk" 2>/dev/null | head -1)"
           if [ -z "$DEBUG_APK" ]; then
             echo "::error::APK не найден после сборки Gradle"
-            find android/app/build -maxdepth 3 -type d 2>/dev/null | head -20 || true
             exit 1
           fi
           cp "$DEBUG_APK" "out/mikrotik-inspector-${V}-android.apk"
@@ -258,6 +174,8 @@ jobs:
           fi
           cd out && sha256sum * > SHA256SUMS-android.txt && cd ..
           ls -lh out/
+          SIZE="$(stat -c%s "out/mikrotik-inspector-${V}-android.apk")"
+          echo "::notice::APK собран: mikrotik-inspector-${V}-android.apk, ${SIZE} байт"
 
       - name: Загрузка APK как артефакта
         uses: actions/upload-artifact@v7
@@ -278,5 +196,5 @@ jobs:
 
             Android: скачайте `mikrotik-inspector-${{ steps.ver.outputs.version }}-android.apk`
             и установите на телефон (разрешите установку из неизвестных источников).
-            Приложение не требует root и не использует интернет-сервисы — данные идут
-            напрямую на роутер по вашей локальной сети.
+            Приложение не требует root: подключение идёт напрямую к роутеру
+            в вашей локальной сети по RouterOS API (8728) или REST (80/443).
