@@ -187,15 +187,20 @@ jobs:
             -PappVersion="${{ steps.ver.outputs.version }}" \
             -PversionCode="${{ steps.ver.outputs.code }}" \
             > /tmp/gradle.log 2>&1 || echo "GRADLE_FAILED=1" >> /tmp/gradle.log
-          tail -30 /tmp/gradle.log
-          find app/build/outputs -name "*.apk" -exec ls -lh {} \; || true
+          echo "--- хвост лога Gradle ---"
+          tail -25 /tmp/gradle.log
+          echo "--- содержимое android/app/build/outputs ---"
+          find app/build/outputs -type f 2>/dev/null | head -20 || echo "каталог outputs отсутствует"
+          echo "--- любые apk в проекте ---"
+          find . -name "*.apk" 2>/dev/null | head -10 || true
 
       - name: Лог сборки APK
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: gradle-log
-          path: /tmp/gradle.log
+          path: |
+            /tmp/gradle.log
           if-no-files-found: warn
           retention-days: 7
 
@@ -206,9 +211,9 @@ jobs:
           if [ -f /tmp/gradle.log ]; then
             echo "::error::GRADLE| — строки с ошибками —"
             grep -n -i -E "error|fail|what went wrong|could not|exception|unresolved" /tmp/gradle.log \
-              | head -n 10 | while IFS= read -r line; do echo "::error::GRADLE| ${line:0:900}"; done
+              | head -n 8 | while IFS= read -r line; do echo "::error::GRADLE| ${line:0:900}"; done
             echo "::error::GRADLE| — последние строки —"
-            tail -n 12 /tmp/gradle.log | while IFS= read -r line; do [ -n "$line" ] && echo "::error::GRADLE| ${line:0:900}"; done
+            tail -n 10 /tmp/gradle.log | while IFS= read -r line; do [ -n "$line" ] && echo "::error::GRADLE| ${line:0:900}"; done
           fi
           exit 1
 
