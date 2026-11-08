@@ -15,6 +15,16 @@ on:
   workflow_dispatch:
   push:
     tags: ["v*"]
+    # APK собирается при изменениях в Android-части, ядре и интерфейсе,
+    # то есть сразу после внесения правок, а не только по тегу.
+    branches: ["**"]
+    paths:
+      - "android/**"
+      - "internal/**"
+      - "web/**"
+      - "mikrotik/**"
+      - "go.mod"
+      - ".github/workflows/android.yml"
 
 permissions:
   contents: write # нужно для загрузки APK в GitHub Release
