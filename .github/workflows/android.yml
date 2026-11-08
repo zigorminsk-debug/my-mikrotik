@@ -184,11 +184,18 @@ jobs:
           gradle --no-daemon -p . :app:assembleDebug \
             -PappVersion="${{ steps.ver.outputs.version }}" \
             -PversionCode="${{ steps.ver.outputs.code }}" \
-            > /tmp/gradle.log 2>&1 || true
+            > /tmp/gradle.log 2>&1 || echo "GRADLE_FAILED=1" >> /tmp/gradle.log
           echo "--- хвост лога Gradle ---"
           tail -25 /tmp/gradle.log
           echo "--- apk в проекте ---"
           find . -name "*.apk" 2>/dev/null | head -10 || true
+          # Предупреждения видны через API аннотаций даже без доступа к журналу.
+          if grep -q "GRADLE_FAILED" /tmp/gradle.log; then
+            echo "::warning::Gradle завершился с ошибкой"
+            grep -n -i -E "error|fail|what went wrong|could not|exception|unresolved|Caused by" /tmp/gradle.log \
+              | head -n 10 | while IFS= read -r line; do echo "::warning::GRADLE| ${line:0:900}"; done
+            tail -n 12 /tmp/gradle.log | while IFS= read -r line; do [ -n "$line" ] && echo "::warning::GRADLE| ${line:0:900}"; done
+          fi
 
       - name: Лог сборки APK
         if: always()
