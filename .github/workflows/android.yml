@@ -177,13 +177,40 @@ jobs:
           exit 1
 
       - name: Сборка APK (Gradle)
+        id: apk
+        continue-on-error: true
         working-directory: android
+        # Лог Gradle сохраняется и дублируется аннотациями: журнал запуска
+        # GitHub не всегда доступен, а причину сбоя видеть нужно.
         run: |
-          set -euo pipefail
           gradle --no-daemon -p . :app:assembleDebug \
             -PappVersion="${{ steps.ver.outputs.version }}" \
-            -PversionCode="${{ steps.ver.outputs.code }}"
-          find app/build/outputs -name "*.apk" -exec ls -lh {} \;
+            -PversionCode="${{ steps.ver.outputs.code }}" \
+            > /tmp/gradle.log 2>&1 || echo "GRADLE_FAILED=1" >> /tmp/gradle.log
+          tail -30 /tmp/gradle.log
+          find app/build/outputs -name "*.apk" -exec ls -lh {} \; || true
+
+      - name: Лог сборки APK
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gradle-log
+          path: /tmp/gradle.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Проверка результата сборки APK
+        if: steps.apk.outcome != 'success'
+        run: |
+          echo "::error::Сборка APK завершилась с ошибкой"
+          if [ -f /tmp/gradle.log ]; then
+            echo "::error::GRADLE| — строки с ошибками —"
+            grep -n -i -E "error|fail|what went wrong|could not|exception|unresolved" /tmp/gradle.log \
+              | head -n 10 | while IFS= read -r line; do echo "::error::GRADLE| ${line:0:900}"; done
+            echo "::error::GRADLE| — последние строки —"
+            tail -n 12 /tmp/gradle.log | while IFS= read -r line; do [ -n "$line" ] && echo "::error::GRADLE| ${line:0:900}"; done
+          fi
+          exit 1
 
       - name: Подпись release-APK (если заданы секреты)
         if: github.ref_type == 'tag'
