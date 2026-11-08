@@ -102,26 +102,49 @@ jobs:
           echo "Собираем версию ${V} (versionCode ${CODE})"
 
       - name: Сборка Go-ядра (bridge.aar)
+        id: bind
+        # Лог пишется в файл и выгружается артефактом: так ошибку видно
+        # даже если GitHub не отдаёт журнал запуска.
+        continue-on-error: true
         working-directory: android
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
         run: |
-          set -euo pipefail
-          echo "gomobile: $(command -v gomobile)"
-          echo "ANDROID_HOME=${ANDROID_HOME:-} NDK=${ANDROID_NDK_HOME:-}"
-          go env GOPATH
-          gomobile init -v 2>&1 | tail -20 || {
-            echo "::error::gomobile init завершился с ошибкой"
-            exit 1
-          }
-          mkdir -p app/libs
-          gomobile bind -v \
-            -target=android/arm,android/arm64,android/amd64 \
-            -androidapi 21 \
-            -ldflags "-s -w -X github.com/zigorminsk-debug/my-mikrotik/android/bridge.version=${{ steps.ver.outputs.version }}" \
-            -o app/libs/bridge.aar \
-            github.com/zigorminsk-debug/my-mikrotik/android/bridge
-          ls -lh app/libs/
+          {
+            echo "== окружение =="
+            go version
+            echo "gomobile: $(command -v gomobile || echo нет)"
+            echo "ANDROID_HOME=${ANDROID_HOME:-} ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-} NDK=${ANDROID_NDK_HOME:-}"
+            go env GOPATH GOFLAGS GOPROXY
+            echo "== gomobile init =="
+            gomobile init -v
+            echo "== gomobile bind =="
+            mkdir -p app/libs
+            gomobile bind -v \
+              -target=android/arm,android/arm64,android/amd64 \
+              -androidapi 21 \
+              -ldflags "-s -w -X github.com/zigorminsk-debug/my-mikrotik/android/bridge.version=${{ steps.ver.outputs.version }}" \
+              -o app/libs/bridge.aar \
+              github.com/zigorminsk-debug/my-mikrotik/android/bridge
+            echo "== результат =="
+            ls -lh app/libs/
+          } > /tmp/bind.log 2>&1
+          status=$?
+          tail -60 /tmp/bind.log
+          exit $status
+
+      - name: Лог сборки ядра
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bind-log
+          path: /tmp/bind.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Проверка результата сборки ядра
+        if: steps.bind.outcome != 'success'
+        run: |
+          echo "::error::Сборка Go-ядра завершилась с ошибкой — см. артефакт bind-log"
+          exit 1
 
       - name: Сборка APK (Gradle)
         working-directory: android
