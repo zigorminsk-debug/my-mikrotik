@@ -101,6 +101,17 @@ jobs:
           echo "code=${CODE}" >> "$GITHUB_OUTPUT"
           echo "Собираем версию ${V} (versionCode ${CODE})"
 
+      - name: Зависимости для gomobile
+        working-directory: android
+        run: |
+          set -euo pipefail
+          # gomobile требует golang.org/x/mobile в графе зависимостей модуля;
+          # версию закрепляем той же, что ставится инструментом.
+          go get golang.org/x/mobile@latest
+          go mod tidy
+          echo "--- go.mod ---"
+          cat go.mod
+
       - name: Сборка Go-ядра (bridge.aar)
         id: bind
         # Лог пишется в файл и выгружается артефактом: так ошибку видно
