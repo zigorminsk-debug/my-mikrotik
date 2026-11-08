@@ -51,6 +51,36 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Установка Android SDK/NDK
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "Android SDK: $SDK"
+          if [ ! -d "$SDK" ]; then
+            echo "::error::Android SDK не найден в $SDK"
+            exit 1
+          fi
+          SDKMGR=""
+          for candidate in "$SDK/cmdline-tools/latest/bin/sdkmanager" "$SDK/cmdline-tools/bin/sdkmanager" "$SDK/tools/bin/sdkmanager"; do
+            if [ -x "$candidate" ]; then SDKMGR="$candidate"; break; fi
+          done
+          if [ -z "$SDKMGR" ]; then
+            echo "::error::sdkmanager не найден"
+            find "$SDK" -maxdepth 3 -name "sdkmanager" 2>/dev/null | head
+            exit 1
+          fi
+          NDK_VERSION="26.1.10909125"
+          "$SDKMGR" --install "platforms;android-34" "build-tools;34.0.0" "ndk;${NDK_VERSION}" > /tmp/sdkmanager.log 2>&1 || {
+            tail -40 /tmp/sdkmanager.log
+            exit 1
+          }
+          tail -5 /tmp/sdkmanager.log
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$SDK/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "NDK: $SDK/ndk/${NDK_VERSION}"
+          ls "$SDK/ndk/${NDK_VERSION}" | head -5
+
       - name: Установка gomobile и gobind
         run: |
           go install golang.org/x/mobile/cmd/gomobile@latest
@@ -73,16 +103,24 @@ jobs:
 
       - name: Сборка Go-ядра (bridge.aar)
         working-directory: android
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
         run: |
           set -euo pipefail
-          gomobile init
+          echo "gomobile: $(command -v gomobile)"
+          echo "ANDROID_HOME=${ANDROID_HOME:-} NDK=${ANDROID_NDK_HOME:-}"
+          go env GOPATH
+          gomobile init -v 2>&1 | tail -20 || {
+            echo "::error::gomobile init завершился с ошибкой"
+            exit 1
+          }
           mkdir -p app/libs
-          gomobile bind \
-            -target=android \
+          gomobile bind -v \
+            -target=android/arm,android/arm64,android/amd64 \
             -androidapi 21 \
             -ldflags "-s -w -X github.com/zigorminsk-debug/my-mikrotik/android/bridge.version=${{ steps.ver.outputs.version }}" \
             -o app/libs/bridge.aar \
-            ./bridge
+            github.com/zigorminsk-debug/my-mikrotik/android/bridge
           ls -lh app/libs/
 
       - name: Сборка APK (Gradle)
