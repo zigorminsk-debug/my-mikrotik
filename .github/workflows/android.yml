@@ -102,36 +102,18 @@ jobs:
           echo "Собираем версию ${V} (versionCode ${CODE})"
 
       - name: Зависимости для gomobile
-        id: deps
-        continue-on-error: true
         working-directory: android
-        # set -e отключён намеренно: лог нужен целиком, даже если команда упала.
+        # gomobile bind требует golang.org/x/mobile в графе зависимостей модуля.
+        # Ставим ту же версию, что и инструмент (latest), и фиксируем в go.sum.
         run: |
-          {
-            echo "== окружение =="
-            go version
-            go env GOPROXY GOFLAGS GONOSUMDB GOSUMDB GOMODCACHE
-            echo "== go get golang.org/x/mobile@latest =="
-            go get golang.org/x/mobile@latest
-            echo "== go mod tidy =="
-            go mod tidy
-            echo "== go.mod =="
-            cat go.mod
-            echo "== go.sum =="
-            head -5 go.sum
-            echo "== go list -m =="
-            go list -m golang.org/x/mobile
-          } > /tmp/deps.log 2>&1 || true
-          echo "--- лог зависимостей ---"
-          cat /tmp/deps.log
-          if ! go list -m golang.org/x/mobile >> /tmp/deps.log 2>&1; then
-            echo "::error::DEPS| не удалось получить golang.org/x/mobile"
-          fi
-          grep -n -i -E "error|fail|cannot|missing|not found|denied|unrecognized|unknown" /tmp/deps.log \
-            | head -8 | while IFS= read -r line; do echo "::error::DEPS| ${line:0:900}"; done
-          echo "::error::DEPS| — последние строки —"
-          tail -6 /tmp/deps.log | while IFS= read -r line; do [ -n "$line" ] && echo "::error::DEPS| ${line:0:900}"; done
-          exit 1
+          set -euo pipefail
+          go get golang.org/x/mobile@latest
+          go mod tidy
+          go list -m golang.org/x/mobile
+          echo "--- go.mod ---"
+          cat go.mod
+          echo "--- go.sum (первые строки) ---"
+          head -5 go.sum
 
       - name: Сборка Go-ядра (bridge.aar)
         id: bind
