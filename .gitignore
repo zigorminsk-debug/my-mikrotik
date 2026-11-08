@@ -1,0 +1,10 @@
+# Артефакты сборки
+/dist/
+*.exe
+*.test
+
+# Локальные файлы
+*.log
+.DS_Store
+.idea/
+.vscode/

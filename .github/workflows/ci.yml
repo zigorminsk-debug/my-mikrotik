@@ -1,0 +1,90 @@
+name: CI
+
+# Сборка и тесты запускаются на каждый push во все ветки проекта,
+# а также на pull request в main и вручную (workflow_dispatch).
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Форматирование, vet и тесты
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Настройка Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false # внешних зависимостей нет — кеш не нужен
+
+      - name: Проверка gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "Не отформатированные файлы:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test (-race)
+        run: go test -race -count=1 ./...
+
+  build:
+    name: Сборка ${{ matrix.artifact }}
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            goos: linux
+            artifact: mikrotik-inspector-linux-amd64
+            ext: ""
+          - runner: windows-latest
+            goos: windows
+            artifact: mikrotik-inspector-windows-amd64.exe
+            ext: ".exe"
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Настройка Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Определение версии
+        shell: bash
+        run: |
+          VERSION="$(git describe --tags --always 2>/dev/null || echo dev)"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Сборка
+        shell: bash
+        run: |
+          mkdir -p dist
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${VERSION}" \
+            -o "dist/${{ matrix.artifact }}" .
+
+      - name: Загрузка артефакта
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14

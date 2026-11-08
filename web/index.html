@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MikroTik Inspector</title>
+<style>
+  :root {
+    --bg: #eef2f7;
+    --card: #ffffff;
+    --ink: #0f172a;
+    --muted: #64748b;
+    --accent: #2563eb;
+    --accent-dark: #1d4ed8;
+    --ok: #16a34a;
+    --err: #dc2626;
+    --border: #e2e8f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: linear-gradient(160deg, #e8eef9 0%, #eef2f7 45%, #f1f5f9 100%);
+    color: var(--ink);
+    min-height: 100vh;
+  }
+  header {
+    background: linear-gradient(90deg, #0f172a 0%, #1e293b 100%);
+    color: #fff;
+    padding: 18px 28px;
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  header h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: .3px; }
+  header .sub { color: #94a3b8; font-size: 13px; }
+  header .ver {
+    margin-left: auto; font-size: 12px; color: #cbd5e1;
+    background: #334155; padding: 3px 10px; border-radius: 999px;
+  }
+  main { max-width: 1040px; margin: 24px auto 48px; padding: 0 16px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, .06);
+    padding: 20px 22px;
+    margin-bottom: 20px;
+  }
+  .card h2 { margin: 0 0 16px; font-size: 15px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); font-weight: 650; }
+  form .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 14px 16px;
+  }
+  label.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
+  input, select {
+    font: inherit;
+    padding: 9px 11px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #f8fafc;
+    color: var(--ink);
+    outline: none;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37, 99, 235, .15); background: #fff; }
+  .row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+  .checkbox { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink); font-weight: 500; cursor: pointer; user-select: none; }
+  .checkbox input { width: 16px; height: 16px; accent-color: var(--accent); }
+  button {
+    font: inherit;
+    font-weight: 600;
+    border: 0;
+    border-radius: 9px;
+    padding: 10px 22px;
+    cursor: pointer;
+    background: var(--accent);
+    color: #fff;
+    transition: background .15s, transform .05s;
+  }
+  button:hover { background: var(--accent-dark); }
+  button:active { transform: translateY(1px); }
+  button:disabled { background: #94a3b8; cursor: wait; }
+  button.ghost { background: #e2e8f0; color: var(--ink); }
+  button.ghost:hover { background: #cbd5e1; }
+  .hint { font-size: 12.5px; color: var(--muted); margin-top: 12px; line-height: 1.5; }
+  .hint code { background: #f1f5f9; padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+
+  #status { display: none; margin-bottom: 20px; }
+  #status.show { display: block; }
+  .badge {
+    display: inline-block; font-size: 12.5px; font-weight: 650;
+    background: #dbeafe; color: #1e40af; border-radius: 999px; padding: 4px 12px; margin-right: 8px;
+  }
+  .badge.id { background: #dcfce7; color: #166534; }
+  .error-box {
+    background: #fef2f2; border: 1px solid #fecaca; color: #991b1b;
+    border-radius: 10px; padding: 14px 16px; font-size: 14px; line-height: 1.55;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .kv {
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .kv .k { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; font-weight: 650; }
+  .kv .v { font-size: 16px; font-weight: 650; margin-top: 5px; word-break: break-word; }
+  .kv .v.empty { color: #cbd5e1; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); background: #f8fafc; }
+  tr:last-child td { border-bottom: 0; }
+  td.mono, .mono { font-family: Consolas, "SF Mono", Menlo, monospace; }
+  .table-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+  .table-head h2 { margin: 0; }
+  .count { font-size: 13px; color: var(--muted); font-weight: 600; }
+  .empty-row { color: var(--muted); font-style: italic; padding: 14px 12px; }
+  .actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+  #result { display: none; }
+  #result.show { display: block; }
+  .spinner {
+    display: inline-block; width: 14px; height: 14px; margin-right: 8px;
+    border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%;
+    animation: spin .7s linear infinite; vertical-align: -2px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  footer { text-align: center; color: var(--muted); font-size: 12.5px; padding-bottom: 30px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MikroTik Inspector</h1>
+  <span class="sub">модель · прошивка · установленные пакеты</span>
+  <span class="ver" id="appver"></span>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Подключение к роутеру</h2>
+    <form id="connform" autocomplete="off">
+      <div class="grid">
+        <label class="field">Адрес роутера
+          <input id="host" name="host" placeholder="192.168.88.1" required>
+        </label>
+        <label class="field">Порт (0 — по умолчанию)
+          <input id="port" name="port" type="number" min="0" max="65535" placeholder="0">
+        </label>
+        <label class="field">Логин
+          <input id="user" name="user" placeholder="admin" required>
+        </label>
+        <label class="field">Пароль
+          <input id="password" name="password" type="password" placeholder="••••••••">
+        </label>
+        <label class="field">Протокол
+          <select id="protocol">
+            <option value="auto" selected>Авто (API → REST)</option>
+            <option value="api">RouterOS API</option>
+            <option value="rest">REST API</option>
+          </select>
+        </label>
+      </div>
+      <div class="row">
+        <label class="checkbox"><input type="checkbox" id="tls"> TLS / HTTPS</label>
+        <button type="submit" id="go">Подключиться</button>
+        <button type="button" class="ghost" id="copy" style="display:none">Скопировать отчёт</button>
+      </div>
+      <div class="hint">
+        Порты по умолчанию: RouterOS API — <code>8728</code> (с TLS — <code>8729</code>),
+        REST API — <code>80</code> (с TLS — <code>443</code>). Рекомендуется включить
+        в RouterOS <code>/ip service</code> api/rest и входить под администратором.
+      </div>
+    </form>
+  </section>
+
+  <div id="status" class="error-box"></div>
+
+  <section id="result">
+    <div class="card">
+      <div class="table-head">
+        <h2>Устройство</h2>
+        <span class="count" id="meta"></span>
+      </div>
+      <div class="cards" id="devcards"></div>
+    </div>
+
+    <div class="card">
+      <div class="table-head">
+        <h2>Установленные пакеты</h2>
+        <span class="count" id="pkgcount"></span>
+      </div>
+      <table>
+        <thead>
+          <tr><th style="width:40%">Имя</th><th style="width:35%">Версия</th><th>Статус</th></tr>
+        </thead>
+        <tbody id="pkgs"><tr><td colspan="3" class="empty-row">нет данных</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    Данные читаются напрямую с роутера по RouterOS API / REST API. Пароль не сохраняется и не покидает локальный компьютер.
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var lastInfo = null;
+
+  var LABELS = [
+    ["identity", "Идентификатор"],
+    ["model", "Модель"],
+    ["board", "Плата"],
+    ["routeros", "Версия RouterOS (прошивка)"],
+    ["currentFirmware", "Текущая прошивка"],
+    ["factoryFirmware", "Заводская прошивка"],
+    ["upgradeFirmware", "Доступна прошивка"],
+    ["architecture", "Архитектура"],
+    ["cpu", "Процессор"],
+    ["uptime", "Аптайм"]
+  ];
+
+  function savePrefs() {
+    try {
+      localStorage.setItem("mti-prefs", JSON.stringify({
+        host: $("host").value.trim(),
+        port: $("port").value.trim(),
+        user: $("user").value.trim(),
+        protocol: $("protocol").value,
+        tls: $("tls").checked
+      }));
+    } catch (e) {}
+  }
+
+  function loadPrefs() {
+    try {
+      var p = JSON.parse(localStorage.getItem("mti-prefs") || "{}");
+      if (p.host) $("host").value = p.host;
+      if (p.port) $("port").value = p.port;
+      if (p.user) $("user").value = p.user;
+      if (p.protocol) $("protocol").value = p.protocol;
+      $("tls").checked = !!p.tls;
+    } catch (e) {}
+  }
+
+  function showError(msg) {
+    var box = $("status");
+    box.textContent = msg;
+    box.classList.add("show");
+    $("result").classList.remove("show");
+    $("copy").style.display = "none";
+  }
+
+  function hideStatus() { $("status").classList.remove("show"); }
+
+  function kvCard(key, value) {
+    var d = document.createElement("div");
+    d.className = "kv";
+    var k = document.createElement("div");
+    k.className = "k";
+    k.textContent = key;
+    var v = document.createElement("div");
+    v.className = "v" + (value ? "" : " empty");
+    v.textContent = value || "—";
+    d.appendChild(k);
+    d.appendChild(v);
+    return d;
+  }
+
+  function protoLabel(p) {
+    if (p === "api") return "RouterOS API";
+    if (p === "rest") return "REST API";
+    return p || "—";
+  }
+
+  function render(info) {
+    lastInfo = info;
+    hideStatus();
+
+    $("meta").textContent = "протокол: " + protoLabel(info.protocol);
+    var wrap = $("devcards");
+    wrap.textContent = "";
+    LABELS.forEach(function (pair) {
+      wrap.appendChild(kvCard(pair[1], info[pair[0]]));
+    });
+
+    var pkgs = info.packages || [];
+    $("pkgcount").textContent = pkgs.length + " шт.";
+    var tb = $("pkgs");
+    tb.textContent = "";
+    if (pkgs.length === 0) {
+      var tr0 = document.createElement("tr");
+      var td0 = document.createElement("td");
+      td0.colSpan = 3;
+      td0.className = "empty-row";
+      td0.textContent = "пакеты не найдены";
+      tr0.appendChild(td0);
+      tb.appendChild(tr0);
+    } else {
+      pkgs.forEach(function (p) {
+        var tr = document.createElement("tr");
+        [p.name, p.version, p.status || "installed"].forEach(function (val, i) {
+          var td = document.createElement("td");
+          if (i < 2) td.className = "mono";
+          td.textContent = val;
+          tr.appendChild(td);
+        });
+        tb.appendChild(tr);
+      });
+    }
+
+    $("result").classList.add("show");
+    $("copy").style.display = "";
+  }
+
+  function report(info) {
+    var lines = [];
+    lines.push("MikroTik Inspector — отчёт о роутере");
+    lines.push("Протокол: " + protoLabel(info.protocol));
+    lines.push("Идентификатор: " + (info.identity || "—"));
+    lines.push("Модель: " + (info.model || "—"));
+    if (info.board) lines.push("Плата: " + info.board);
+    lines.push("Версия RouterOS: " + (info.routeros || "—"));
+    if (info.currentFirmware) lines.push("Текущая прошивка: " + info.currentFirmware);
+    if (info.factoryFirmware) lines.push("Заводская прошивка: " + info.factoryFirmware);
+    if (info.architecture) lines.push("Архитектура: " + info.architecture);
+    if (info.cpu) lines.push("Процессор: " + info.cpu);
+    if (info.uptime) lines.push("Аптайм: " + info.uptime);
+    lines.push("");
+    lines.push("Установленные пакеты (" + (info.packages || []).length + "):");
+    (info.packages || []).forEach(function (p) {
+      lines.push("  - " + p.name + " " + p.version + (p.status ? " [" + p.status + "]" : ""));
+    });
+    return lines.join("\n");
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve, reject) {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); resolve(); }
+      catch (e) { reject(e); }
+      finally { document.body.removeChild(ta); }
+    });
+  }
+
+  $("connform").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var btn = $("go");
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Читаем данные…';
+    savePrefs();
+
+    var payload = {
+      host: $("host").value.trim(),
+      port: parseInt($("port").value, 10) || 0,
+      user: $("user").value.trim(),
+      password: $("password").value,
+      tls: $("tls").checked,
+      protocol: $("protocol").value
+    };
+
+    fetch("/api/info", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+      .then(function (r) { return r.json().catch(function () { throw new Error("сервер вернул некорректный ответ (HTTP " + r.status + ")"); }); })
+      .then(function (data) {
+        if (!data.ok) throw new Error(data.error || "неизвестная ошибка");
+        if (data.version) $("appver").textContent = "v" + data.version;
+        render(data.info);
+      })
+      .catch(function (e) { showError(e.message || String(e)); })
+      .finally(function () {
+        btn.disabled = false;
+        btn.textContent = "Подключиться";
+      });
+  });
+
+  $("copy").addEventListener("click", function () {
+    if (!lastInfo) return;
+    var btn = this;
+    copyText(report(lastInfo)).then(function () {
+      var old = btn.textContent;
+      btn.textContent = "Скопировано ✓";
+      setTimeout(function () { btn.textContent = old; }, 1500);
+    }).catch(function () {
+      showError("не удалось скопировать в буфер обмена");
+    });
+  });
+
+  loadPrefs();
+})();
+</script>
+</body>
+</html>

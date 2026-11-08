@@ -1,0 +1,52 @@
+name: Release
+
+# Публикует GitHub Release с готовыми бинарниками при пуше тега v*.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # нужно для создания Release и загрузки файлов
+
+jobs:
+  release:
+    name: Сборка и публикация релиза
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # нужен git describe для версии
+
+      - name: Настройка Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Версия из тега
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Сборка Windows и Linux
+        run: |
+          set -euo pipefail
+          V="${{ steps.ver.outputs.version }}"
+          mkdir -p dist
+          go build -trimpath -ldflags "-s -w -X main.version=${V}" \
+            -o "dist/mikrotik-inspector-${V}-windows-amd64.exe" .
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=${V}" \
+            -o "dist/mikrotik-inspector-${V}-linux-amd64" .
+          cd dist && sha256sum * > SHA256SUMS.txt && cd ..
+
+      - name: Создание GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*
+          generate_release_notes: true
+          body: |
+            **MikroTik Inspector ${{ steps.ver.outputs.version }}**
+
+            Windows: скачайте `mikrotik-inspector-${{ steps.ver.outputs.version }}-windows-amd64.exe`,
+            запустите двойным щелчком — откроется HTML-интерфейс в браузере.
