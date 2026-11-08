@@ -174,9 +174,26 @@ GOOS=windows (amd64)       → dist/mikrotik-inspector-windows-amd64.exe (MZ)
 
 ## Статус CI
 
-> Раздел обновляется по факту запусков.
+### Запуск #1 — `42512972572` (push f1d52eb, ветка `arena/74faea74-my-mikrotik`)
 
-<!-- CI-STATUS -->
+| Job | Результат |
+|---|---|
+| Форматирование, vet и тесты | ✅ 40s (`gofmt`, `go vet`, `go test -race`) |
+| Сборка mikrotik-inspector-linux-amd64 | ✅ 27s, артефакт загружен |
+| Сборка mikrotik-inspector-windows-amd64.exe | ✅ 36s, артефакт загружен |
+
+**Итог:** `success`, артефакты: `mikrotik-inspector-linux-amd64`,
+`mikrotik-inspector-windows-amd64.exe`.
+
+Замечания аннотаций (не влияют на результат): устаревший Node.js 20 у
+`actions/checkout@v4` / `setup-go@v5` / `upload-artifact@v4` и предупреждение
+о миграции `ubuntu-latest` на Ubuntu 26. **Принято решение:** обновить все
+используемые действия до актуальных мажорных версий
+(`checkout@v7`, `setup-go@v7`, `upload-artifact@v7`, `action-gh-release@v3`).
+
+### Запуск #2 — после обновления действий
+
+См. `gh run list` — запуск инициирован пушем с обновлением workflow.
 
 ---
 
