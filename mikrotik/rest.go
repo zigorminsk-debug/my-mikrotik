@@ -172,3 +172,33 @@ func collectREST(ctx context.Context, p *Params) (*Info, error) {
 	}
 	return info, nil
 }
+
+// post выполняет POST-запрос с JSON-телом и возвращает тело ответа.
+// Ошибки HTTP-статусов (кроме 2xx) превращаются в error с сообщением роутера.
+func (rc *restClient) post(ctx context.Context, path string, body any) ([]byte, error) {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rc.base+path, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.SetBasicAuth(rc.user, rc.pass)
+
+	resp, err := rc.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("запрос %s не выполнен: %w", path, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, fmt.Errorf("ошибка чтения ответа %s: %w", path, err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("%s: HTTP %d: %s", path, resp.StatusCode, restErrorMessage(data, resp.StatusCode))
+	}
+	return data, nil
+}
