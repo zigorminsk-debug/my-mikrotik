@@ -137,6 +137,7 @@ jobs:
             gomobile bind -v \
               -target=android/arm,android/arm64,android/amd64 \
               -androidapi 21 \
+              -javapkg=com.mikrotik.inspector \
               -ldflags "-s -w -X github.com/zigorminsk-debug/my-mikrotik/android/bridge.version=${{ steps.ver.outputs.version }}" \
               -o app/libs/bridge.aar \
               github.com/zigorminsk-debug/my-mikrotik/android/bridge
