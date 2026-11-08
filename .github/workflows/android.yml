@@ -102,18 +102,30 @@ jobs:
           echo "Собираем версию ${V} (versionCode ${CODE})"
 
       - name: Зависимости для gomobile
+        id: deps
+        continue-on-error: true
         working-directory: android
         # gomobile bind требует golang.org/x/mobile в графе зависимостей модуля.
         # Ставим ту же версию, что и инструмент (latest), и фиксируем в go.sum.
         run: |
-          set -euo pipefail
-          go get golang.org/x/mobile@latest
+          {
+            echo "== go env =="
+            go env GOPROXY GOSUMDB GOFLAGS GOPATH GOMODCACHE GOVERSION
+            echo "== go get =="
+            go get golang.org/x/mobile@latest -x
+          } > /tmp/deps.log 2>&1
+          status=$?
+          tail -45 /tmp/deps.log
+          if [ $status -ne 0 ]; then
+            echo "::error::DEPS| шаг завершился с кодом $status"
+            grep -n -i -E "error|fail|cannot|missing|not found|denied|unknown|timeout|refused" /tmp/deps.log \
+              | head -10 | while IFS= read -r line; do echo "::error::DEPS| ${line:0:900}"; done
+            echo "::error::DEPS| — последние строки —"
+            tail -10 /tmp/deps.log | while IFS= read -r line; do [ -n "$line" ] && echo "::error::DEPS| ${line:0:900}"; done
+            exit $status
+          fi
           go mod tidy
           go list -m golang.org/x/mobile
-          echo "--- go.mod ---"
-          cat go.mod
-          echo "--- go.sum (первые строки) ---"
-          head -5 go.sum
 
       - name: Сборка Go-ядра (bridge.aar)
         id: bind
