@@ -237,11 +237,17 @@ jobs:
           set -euo pipefail
           V="${{ steps.ver.outputs.version }}"
           mkdir -p out
-          cp android/app/build/outputs/apk/debug/app-debug.apk \
-             "out/mikrotik-inspector-${V}-android.apk" || true
-          if [ -f android/app/build/outputs/apk/release/app-release.apk ]; then
-            cp android/app/build/outputs/apk/release/app-release.apk \
-               "out/mikrotik-inspector-${V}-android-release.apk"
+          echo "--- найденные APK ---"
+          find android/app/build/outputs -name "*.apk" -exec ls -lh {} \;
+          DEBUG_APK="$(find android/app/build/outputs -path "*debug*" -name "*.apk" | head -1)"
+          if [ -z "$DEBUG_APK" ]; then
+            echo "::error::APK не найдены в android/app/build/outputs"
+            exit 1
+          fi
+          cp "$DEBUG_APK" "out/mikrotik-inspector-${V}-android.apk"
+          REL_APK="$(find android/app/build/outputs -path "*release*" -name "*.apk" | head -1 || true)"
+          if [ -n "$REL_APK" ]; then
+            cp "$REL_APK" "out/mikrotik-inspector-${V}-android-release.apk"
           fi
           cd out && sha256sum * > SHA256SUMS-android.txt && cd ..
           ls -lh out/
