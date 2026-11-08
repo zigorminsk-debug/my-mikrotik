@@ -142,6 +142,10 @@ jobs:
               github.com/zigorminsk-debug/my-mikrotik/android/bridge
             echo "== результат =="
             ls -lh app/libs/
+            echo "== содержимое aar =="
+            unzip -l app/libs/bridge.aar | head -30
+            echo "== классы в classes.jar =="
+            mkdir -p /tmp/aar && cd /tmp/aar && unzip -o -q "$OLDPWD/app/libs/bridge.aar" classes.jar && unzip -l classes.jar | grep -i "\.class" | head -30
           } > /tmp/bind.log 2>&1
           status=$?
           tail -60 /tmp/bind.log
