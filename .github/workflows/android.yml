@@ -143,7 +143,15 @@ jobs:
       - name: Проверка результата сборки ядра
         if: steps.bind.outcome != 'success'
         run: |
-          echo "::error::Сборка Go-ядра завершилась с ошибкой — см. артефакт bind-log"
+          # Аннотации доступны через API GitHub, поэтому хвост лога дублируем
+          # в виде ::error:: строк — это позволяет увидеть причину сбоя без
+          # скачивания артефактов.
+          echo "::error::Сборка Go-ядра завершилась с ошибкой"
+          if [ -f /tmp/bind.log ]; then
+            tail -n 25 /tmp/bind.log | while IFS= read -r line; do
+              [ -n "$line" ] && echo "::error::BIND| ${line:0:900}"
+            done
+          fi
           exit 1
 
       - name: Сборка APK (Gradle)
