@@ -148,7 +148,13 @@ jobs:
           # скачивания артефактов.
           echo "::error::Сборка Go-ядра завершилась с ошибкой"
           if [ -f /tmp/bind.log ]; then
-            tail -n 25 /tmp/bind.log | while IFS= read -r line; do
+            echo "::error::BIND| --- строки с ошибками ---"
+            grep -n -i -E "error|fail|cannot|no usable|unknown flag|missing|not found|no such" /tmp/bind.log \
+              | head -n 12 | while IFS= read -r line; do
+                echo "::error::BIND| ${line:0:900}"
+              done
+            echo "::error::BIND| --- последние строки ---"
+            tail -n 12 /tmp/bind.log | while IFS= read -r line; do
               [ -n "$line" ] && echo "::error::BIND| ${line:0:900}"
             done
           fi
