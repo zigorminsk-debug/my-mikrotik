@@ -224,15 +224,16 @@ jobs:
           set -euo pipefail
           V="${{ steps.ver.outputs.version }}"
           mkdir -p out
-          echo "--- найденные APK ---"
-          find android/app/build/outputs -name "*.apk" -exec ls -lh {} \;
-          DEBUG_APK="$(find android -name "*.apk" | head -1)"
+          echo "--- apk в рабочем каталоге ---"
+          find . -name "*.apk" 2>/dev/null | head -10 || true
+          DEBUG_APK="$(find android -name "*.apk" 2>/dev/null | head -1)"
           if [ -z "$DEBUG_APK" ]; then
-            echo "::error::APK не найдены в android/app/build/outputs"
+            echo "::error::APK не найден после сборки Gradle"
+            find android/app/build -maxdepth 3 -type d 2>/dev/null | head -20 || true
             exit 1
           fi
           cp "$DEBUG_APK" "out/mikrotik-inspector-${V}-android.apk"
-          REL_APK="$(find android/app/build/outputs -path "*release*" -name "*.apk" | head -1 || true)"
+          REL_APK="$(find android/app/build/outputs -path "*release*" -name "*.apk" 2>/dev/null | head -1 || true)"
           if [ -n "$REL_APK" ]; then
             cp "$REL_APK" "out/mikrotik-inspector-${V}-android-release.apk"
           fi
