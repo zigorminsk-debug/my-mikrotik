@@ -325,6 +325,18 @@ Wi-Fi legacy/wave2, «пакет есть — интерфейсов нет», �
 Проверка перед пушем (локально): `gofmt -l .` пусто, `go vet ./...` без замечаний,
 `go test -race -count=1 ./...` — 34 теста PASS, сценарий интерфейса на jsdom — 21 проверка PASS.
 
+### Релиз `v0.2.0` — запуск `42518956002` (workflow `Release`)
+
+Тег `v0.2.0` опубликован, GitHub Release содержит:
+
+| Файл | Назначение |
+|---|---|
+| `mikrotik-inspector-v0.2.0-windows-amd64.exe` | готовая Windows-программа с конструктором |
+| `mikrotik-inspector-v0.2.0-linux-amd64` | Linux-сборка |
+| `SHA256SUMS.txt` | контрольные суммы |
+
+Релиз: https://github.com/zigorminsk-debug/my-mikrotik/releases/tag/v0.2.0 — **`success`**.
+
 Осталось одно известное предупреждение GitHub: `ubuntu-latest` переедет на Ubuntu 26
 после 19.10.2026 (на работу не влияет, действия уже на актуальных мажорах).
 
