@@ -127,6 +127,9 @@ func TestLTEAutomaticAPN(t *testing.T) {
 			if !res.OK {
 				t.Fatal(res.Error)
 			}
+			if !strings.Contains(res.Script, "/interface lte apn add name=mti-wan-0-apn "+attr("apn", apn)+" }") {
+				t.Fatal("APN is required explicitly at profile creation, even when empty")
+			}
 			if !strings.Contains(res.Script, attr("apn", apn)) {
 				t.Fatal("APN not set/reset")
 			}
