@@ -330,9 +330,9 @@ func TestGenerate_LegacyWiFi(t *testing.T) {
 		"/ip address add address=192.168.88.1/24 interface=ether2 comment=mti-lan disabled=no",
 		"/ip pool add name=mti-pool ranges=192.168.88.2-192.168.88.254",
 		"/ip dhcp-server add name=mti-dhcp interface=ether2 address-pool=mti-pool lease-time=1d disabled=no",
-		"/ip dhcp-server-network add address=192.168.88.0/24 gateway=192.168.88.1 dns-server=8.8.8.8,8.8.4.4 comment=mti-net",
+		"/ip dhcp-server network add address=192.168.88.0/24 gateway=192.168.88.1 dns-server=8.8.8.8,8.8.4.4 comment=mti-net",
 		"/ip dns set servers=8.8.8.8,8.8.4.4 allow-remote-requests=yes",
-		"/system ntp client set enabled=yes servers=pool.ntp.org",
+		"/system ntp client servers add address=pool.ntp.org",
 		"/system clock set time-zone-name=Europe/Minsk",
 		"/interface pppoe-client add name=pppoe-out1 interface=ether1 user=ispuser password=secret123 add-default-route=yes use-peer-dns=yes dial-on-demand=no disabled=no",
 		"/ip firewall nat add chain=srcnat out-interface=pppoe-out1 action=masquerade comment=mti-pppoe",
@@ -707,5 +707,27 @@ func TestAnalyzeFeatures_WifiQcom(t *testing.T) {
 	w := featureByID(t, feats, featWiFi)
 	if !w.Available || w.Mode != "wave2" || w.Package != "wifi-qcom" {
 		t.Errorf("wifi = %+v", w)
+	}
+}
+
+func TestDHCPNetworkAndNTPRouterOS7Paths(t *testing.T) {
+	s := fullSettings()
+	s.WiFi.Enabled = false
+	s.PPPoE.Enabled = false
+	device := deviceWith("routeros")
+	device.RouterOS = "7.22.3"
+	res := Generate(device, nil, &s, testTime())
+	if !res.OK {
+		t.Fatal(res.Error)
+	}
+	for _, bad := range []string{"/ip dhcp-server-network", "/system ntp client set enabled=yes servers="} {
+		if strings.Contains(res.Script, bad) {
+			t.Errorf("invalid path/property: %s", bad)
+		}
+	}
+	for _, want := range []string{"/ip dhcp-server network remove", "/ip dhcp-server network add", "/system ntp client servers find where address=pool.ntp.org", "/system ntp client servers add address=pool.ntp.org"} {
+		if !strings.Contains(res.Script, want) {
+			t.Errorf("missing %s", want)
+		}
 	}
 }

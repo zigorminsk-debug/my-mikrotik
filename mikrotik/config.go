@@ -806,7 +806,7 @@ func buildScript(device *Info, s *Settings, now time.Time, avail map[string]bool
 			attr("interface", dhcpIface(s)),
 			attr("address-pool", "mti-pool"),
 			attr("lease-time", strings.TrimSpace(s.DHCP.LeaseTime)))
-		fmt.Fprintf(&b, "/ip dhcp-server-network remove [find comment=mti-net]\n")
+		fmt.Fprintf(&b, "/ip dhcp-server network remove [find comment=mti-net]\n")
 		netAttrs := []string{
 			attr("address", lanNetwork),
 			attr("gateway", lanGateway),
@@ -815,7 +815,7 @@ func buildScript(device *Info, s *Settings, now time.Time, avail map[string]bool
 			netAttrs = append(netAttrs, attr("dns-server", strings.TrimSpace(s.DNS.Servers)))
 		}
 		netAttrs = append(netAttrs, "comment=mti-net")
-		fmt.Fprintf(&b, "/ip dhcp-server-network add %s\n", strings.Join(netAttrs, " "))
+		fmt.Fprintf(&b, "/ip dhcp-server network add %s\n", strings.Join(netAttrs, " "))
 	}
 
 	if s.DNS.Enabled && avail[featDNS] {
@@ -832,8 +832,23 @@ func buildScript(device *Info, s *Settings, now time.Time, avail map[string]bool
 	if s.NTP.Enabled && avail[featNTP] {
 		anyOn = true
 		section(&b, "System", "NTP Client")
-		fmt.Fprintf(&b, "/system ntp client set enabled=yes %s\n",
-			attr("servers", strings.TrimSpace(s.NTP.Servers)))
+		if device != nil && strings.HasPrefix(device.RouterOS, "7.") {
+			b.WriteString("/system ntp client set enabled=yes\n")
+			// Preserve existing entries; add missing addresses without duplicating them.
+			for _, host := range splitList(s.NTP.Servers) {
+				fmt.Fprintf(&b, ":if ([:len [/system ntp client servers find where address=%s]] = 0) do={ /system ntp client servers add %s }\n", rosQuote(host), attr("address", host))
+			}
+		} else {
+			hosts := splitList(s.NTP.Servers)
+			primary, secondary := "0.0.0.0", "0.0.0.0"
+			if len(hosts) > 0 {
+				primary = hosts[0]
+			}
+			if len(hosts) > 1 {
+				secondary = hosts[1]
+			}
+			fmt.Fprintf(&b, "/system ntp client set enabled=yes %s %s\n", attr("primary-ntp", primary), attr("secondary-ntp", secondary))
+		}
 		fmt.Fprintf(&b, "/system clock set %s\n", attr("time-zone-name", strings.TrimSpace(s.NTP.TimeZone)))
 	}
 
