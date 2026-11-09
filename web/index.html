@@ -494,10 +494,10 @@
                 <span class="lock" hidden></span>
               </label>
               <div class="sec-body">
-                <p>Один или два канала DHCP / статический IPv4. Меньшая distance — основной канал.
+                <p>Основной и необязательный резервный провайдер: LTE или проводной (DHCP / статический IPv4).
                 Для PPPoE пока используется отдельный раздел. VLAN провайдера нужно создать заранее.</p>
                 <div id="wan-links"></div>
-                <button type="button" class="ghost" id="wan-add">Добавить WAN-канал</button>
+                <button type="button" class="ghost" id="wan-add">Добавить провайдера</button>
                 <p>DHCP: резервирование при потере lease/link. Ping статического шлюза НЕ проверяет интернет за ним.
                 Существующие DHCP-клиенты и маршруты могут конфликтовать: проверьте конфигурацию перед применением.
                 Настройки DNS задаются отдельно. Снятие галочки не удаляет ранее применённые настройки.</p>
@@ -795,6 +795,7 @@
 
   function applyInterfaces(list) {
     lastIfaces = list || [];
+    Array.from($("wan-links").children).forEach(function(row) { row.updateMode(); });
     var ethernet = lastIfaces;
     var wifi = lastIfaces.filter(isWifi);
 
@@ -842,39 +843,56 @@
     });
   }
 
+  function updateWANRoles() {
+    Array.from($("wan-links").children).forEach(function(row, index) {
+      row.querySelector("legend").textContent = index ? "Резервный провайдер" : "Основной провайдер";
+      row.querySelector('[data-key="distance"]').value = index + 1;
+    });
+  }
   $("wan-add").addEventListener("click", function () {
-    var count = $("wan-links").children.length;
-    if (count >= 2) return;
+    if ($("wan-links").children.length >= 2) return;
     var row = document.createElement("fieldset");
-    var legend = document.createElement("legend"); legend.textContent = "WAN-канал"; row.appendChild(legend);
+    row.appendChild(document.createElement("legend"));
     var grid = document.createElement("div"); grid.className = "grid";
-    [["iface", "Интерфейс (например ether1)", "text"], ["mode", "Подключение", "select"],
+    [["mode", "Тип подключения", "select"], ["iface", "Интерфейс провайдера", "select"],
+     ["apn", "APN оператора LTE", "text"],
      ["address", "Статический IPv4/CIDR", "text"], ["gateway", "Шлюз статического канала", "text"],
-     ["distance", "Приоритет: меньше — основной (1–254)", "number"],
+     ["distance", "Приоритет (по роли провайдера)", "number"],
      ["nat", "NAT masquerade", "checkbox"], ["checkGateway", "Ping шлюза (только static)", "checkbox"]].forEach(function (spec) {
       var label = document.createElement("label"); label.className = "field"; label.textContent = spec[1];
       var input = document.createElement(spec[2] === "select" ? "select" : "input");
-      if (spec[2] === "select") ["dhcp", "static"].forEach(function (v) {
-        var o = document.createElement("option"); o.value = v; o.textContent = v.toUpperCase(); input.appendChild(o);
-      }); else input.type = spec[2];
+      if (spec[0] === "mode") [["dhcp","Проводной — DHCP"],["static","Проводной — статический IPv4"],["lte","LTE"]].forEach(function(v) {
+        var o = document.createElement("option"); o.value = v[0]; o.textContent = v[1]; input.appendChild(o);
+      }); else if (spec[2] !== "select") input.type = spec[2];
       input.dataset.key = spec[0];
-      if (spec[0] === "distance") { input.min = "1"; input.max = "254"; input.value = count ? "2" : "1"; }
+      if (spec[0] === "distance") input.readOnly = true;
       if (spec[0] === "nat") input.checked = true;
       label.appendChild(input); grid.appendChild(label);
     });
     row.appendChild(grid);
-    function updateMode() {
-      var dhcp = row.querySelector('[data-key="mode"]').value === "dhcp";
-      ["address", "gateway", "checkGateway"].forEach(function (key) {
-        var el = row.querySelector('[data-key="' + key + '"]'); el.disabled = dhcp;
-        if (dhcp && key === "checkGateway") el.checked = false;
+    row.updateMode = function () {
+      var mode = row.querySelector('[data-key="mode"]').value;
+      var lte = mode === "lte";
+      var candidates = lastIfaces.filter(function(i) {
+        var t = (i.type || "").toLowerCase();
+        return lte ? t === "lte" : t === "ether" || t === "ethernet";
       });
-    }
-    row.querySelector('[data-key="mode"]').addEventListener("change", updateMode); updateMode();
-    var remove = document.createElement("button"); remove.type = "button"; remove.className = "ghost"; remove.textContent = "Удалить канал";
-    remove.addEventListener("click", function () { row.remove(); schedulePreview(); }); row.appendChild(remove);
+      var sel = row.querySelector('[data-key="iface"]');
+      fillSelect(sel, candidates);
+      if (lte && candidates.length) sel.value = sel.value || candidates[0].name;
+      sel.disabled = lte && candidates.length <= 1;
+      ["address", "gateway", "checkGateway", "apn"].forEach(function (key) {
+        var el = row.querySelector('[data-key="' + key + '"]');
+        var active = key === "apn" ? lte : mode === "static";
+        el.disabled = !active; el.parentElement.hidden = !active;
+        if (!active && key === "checkGateway") el.checked = false;
+      });
+    };
+    row.querySelector('[data-key="mode"]').addEventListener("change", row.updateMode); row.updateMode();
+    var remove = document.createElement("button"); remove.type = "button"; remove.className = "ghost"; remove.textContent = "Удалить провайдера";
+    remove.addEventListener("click", function () { row.remove(); updateWANRoles(); schedulePreview(); }); row.appendChild(remove);
     row.addEventListener("input", schedulePreview); row.addEventListener("change", schedulePreview);
-    $("wan-links").appendChild(row); schedulePreview();
+    $("wan-links").appendChild(row); updateWANRoles(); schedulePreview();
   });
 
   $("forward-add").addEventListener("click", function () {

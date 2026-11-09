@@ -14,6 +14,7 @@ type WANSettings struct {
 }
 
 type WANLink struct {
+	APN          string `json:"apn"`
 	Interface    string `json:"iface"`
 	Mode         string `json:"mode"`
 	Address      string `json:"address"`
@@ -50,6 +51,13 @@ func validateWAN(s WANSettings, pppoe PPPoESettings) []string {
 		}
 		distances[r.Distance] = true
 		switch r.Mode {
+		case "lte":
+			if r.CheckGateway {
+				problems = append(problems, "ping шлюза для LTE не поддерживается")
+			}
+			if strings.TrimSpace(r.APN) == "" {
+				problems = append(problems, "укажите APN оператора")
+			}
 		case "dhcp":
 			if r.CheckGateway {
 				problems = append(problems, "ping шлюза в режиме DHCP пока не поддерживается")
@@ -65,7 +73,7 @@ func validateWAN(s WANSettings, pppoe PPPoESettings) []string {
 				problems = append(problems, "шлюз должен быть отдельным IPv4 в подсети WAN")
 			}
 		default:
-			problems = append(problems, "способ подключения должен быть dhcp или static")
+			problems = append(problems, "способ подключения должен быть dhcp, static или lte")
 		}
 		if len(problems) > 0 {
 			errs = append(errs, fmt.Sprintf("WAN, канал %d: %s", i+1, strings.Join(problems, ", ")))
@@ -77,18 +85,29 @@ func validateWAN(s WANSettings, pppoe PPPoESettings) []string {
 	return errs
 }
 
-func buildWAN(b *strings.Builder, s WANSettings) {
+func buildWAN(b *strings.Builder, s WANSettings, device *Info, ifaces []Iface) {
 	section(b, "IP / WAN", "Основной и резервный IPv4-каналы")
 	b.WriteString("# Сохраните export/backup. Проверьте существующие DHCP clients, адреса и default routes.\n# Меньшая distance — основной канал. DHCP переключается при потере lease/link.\n# check-gateway=ping проверяет только шлюз, НЕ интернет за ним.\n")
 	for i := 0; i < 2; i++ {
 		tag := fmt.Sprintf("mti-wan-%d", i)
+		if hasAnyIface(ifaces, func(f Iface) bool { return strings.EqualFold(f.Type, "lte") }) {
+			fmt.Fprintf(b, "/interface lte apn set [find where name=%s] add-default-route=no\n", rosQuote(tag+"-apn"))
+		}
 		for _, path := range []string{"/ip dhcp-client", "/ip route", "/ip address", "/ip firewall nat"} {
 			fmt.Fprintf(b, "%s remove [find comment=%s]\n", path, rosQuote(tag))
 		}
 	}
 	for i, r := range s.Links {
 		tag := attr("comment", fmt.Sprintf("mti-wan-%d", i))
-		if r.Mode == "dhcp" {
+		if r.Mode == "lte" {
+			name := fmt.Sprintf("mti-wan-%d-apn", i)
+			fmt.Fprintf(b, ":if ([:len [/interface lte apn find where name=%s]] = 0) do={ /interface lte apn add %s }\n", rosQuote(name), attr("name", name))
+			fmt.Fprintf(b, "/interface lte apn set [find where name=%s] %s add-default-route=yes default-route-distance=%d use-peer-dns=no\n", rosQuote(name), attr("apn", r.APN), r.Distance)
+			if device != nil && strings.HasPrefix(device.RouterOS, "7.") {
+				fmt.Fprintf(b, "/interface lte apn set [find where name=%s] use-network-apn=no\n", rosQuote(name))
+			}
+			fmt.Fprintf(b, "/interface lte set [find where name=%s] %s disabled=no\n", rosQuote(r.Interface), attr("apn-profiles", name))
+		} else if r.Mode == "dhcp" {
 			fmt.Fprintf(b, "/ip dhcp-client add %s add-default-route=yes default-route-distance=%d use-peer-dns=no disabled=no %s\n", attr("interface", r.Interface), r.Distance, tag)
 		} else {
 			fmt.Fprintf(b, "/ip address add %s %s %s\n", attr("interface", r.Interface), attr("address", r.Address), tag)
@@ -143,4 +162,27 @@ func usableWANHost(ip net.IP, network *net.IPNet) bool {
 		broadcast[i] |= ^network.Mask[i]
 	}
 	return !ip.Equal(network.IP) && !ip.Equal(broadcast)
+}
+
+// Validate against discovered hardware rather than guessing interfaces from their names.
+func validateWANInterfaces(s WANSettings, ifaces []Iface) []string {
+	var errs []string
+	for i, r := range s.Links {
+		found := false
+		for _, f := range ifaces {
+			if f.Name != r.Interface {
+				continue
+			}
+			found = true
+			lte := strings.EqualFold(f.Type, "lte")
+			ether := strings.EqualFold(f.Type, "ether") || strings.EqualFold(f.Type, "ethernet")
+			if (r.Mode == "lte" && !lte) || (r.Mode != "lte" && !ether) {
+				errs = append(errs, fmt.Sprintf("WAN, канал %d: тип интерфейса не соответствует подключению", i+1))
+			}
+		}
+		if !found {
+			errs = append(errs, fmt.Sprintf("WAN, канал %d: интерфейс не найден; обновите данные роутера", i+1))
+		}
+	}
+	return errs
 }

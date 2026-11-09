@@ -1,6 +1,7 @@
 package mikrotik
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -11,7 +12,7 @@ func TestWANGenerate(t *testing.T) {
 		{Interface: "ether1", Mode: "static", Address: "192.0.2.2/24", Gateway: "192.0.2.1", Distance: 1, NAT: true, CheckGateway: true},
 		{Interface: "ether2", Mode: "dhcp", Distance: 2, NAT: true},
 	}}}
-	res := Generate(deviceWith("routeros"), nil, &s, time.Time{})
+	res := Generate(deviceWith("routeros"), []Iface{{Name: "ether1", Type: "ether"}, {Name: "ether2", Type: "ether"}}, &s, time.Time{})
 	if !res.OK {
 		t.Fatal(res.Error)
 	}
@@ -80,5 +81,38 @@ func TestWANNetworkAndBroadcast(t *testing.T) {
 		if len(validateWAN(WANSettings{Links: []WANLink{{Interface: "ether1", Mode: "static", Address: address, Gateway: "192.0.2.1", Distance: 1}}}, PPPoESettings{})) == 0 {
 			t.Errorf("accepted %s", address)
 		}
+	}
+}
+
+func TestLTEPrimaryOrBackup(t *testing.T) {
+	for _, distance := range []int{1, 2} {
+		s := Settings{WAN: WANSettings{Enabled: true, Links: []WANLink{{Interface: "lte1", Mode: "lte", APN: "internet", Distance: distance, NAT: true}}}}
+		res := Generate(deviceWith("routeros"), []Iface{{Name: "lte1", Type: "lte"}}, &s, time.Time{})
+		if !res.OK {
+			t.Fatal(res.Error)
+		}
+		for _, want := range []string{"/interface lte apn set", "apn=internet", fmt.Sprintf("default-route-distance=%d", distance), "apn-profiles=mti-wan-0-apn", "out-interface=lte1"} {
+			if !strings.Contains(res.Script, want) {
+				t.Errorf("missing %s", want)
+			}
+		}
+		if strings.Contains(res.Script, "/ip dhcp-client add") {
+			t.Fatal("LTE must not create Ethernet DHCP client")
+		}
+	}
+}
+
+func TestLTEInterfaceValidation(t *testing.T) {
+	s := WANSettings{Links: []WANLink{{Mode: "lte", Interface: "ether1", Distance: 1, APN: "internet"}}}
+	if len(validateWANInterfaces(s, []Iface{{Name: "ether1", Type: "ether"}})) == 0 {
+		t.Fatal("Ethernet accepted as LTE")
+	}
+	s.Links[0].Interface = "lte1"
+	if len(validateWANInterfaces(s, nil)) == 0 {
+		t.Fatal("missing LTE accepted")
+	}
+	s.Links[0].APN = ""
+	if len(validateWAN(s, PPPoESettings{})) == 0 {
+		t.Fatal("empty APN accepted")
 	}
 }

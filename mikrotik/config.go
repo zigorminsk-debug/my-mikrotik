@@ -556,6 +556,7 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 	if s.WAN.Enabled && avail["wan"] {
 		errs = append(errs, validateWAN(s.WAN, s.PPPoE)...)
 		errs = append(errs, validateWANLocal(s.WAN, s.LAN)...)
+		errs = append(errs, validateWANInterfaces(s.WAN, ifaces)...)
 	}
 	if s.PortForward.Enabled && avail["portForward"] {
 		errs = append(errs, validatePortForward(s.PortForward)...)
@@ -718,7 +719,7 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 	}
 
 	// --- скрипт ---
-	res.Script = buildScript(device, s, now, avail, lanNetwork, lanGateway, lanPool, mode)
+	res.Script = buildScript(device, s, now, avail, lanNetwork, lanGateway, lanPool, mode, ifaces)
 	return res
 }
 
@@ -754,7 +755,7 @@ func section(b *strings.Builder, menu, title string) {
 }
 
 func buildScript(device *Info, s *Settings, now time.Time, avail map[string]bool,
-	lanNetwork, lanGateway, lanPool, wifiMode string) string {
+	lanNetwork, lanGateway, lanPool, wifiMode string, ifaces []Iface) string {
 
 	var b strings.Builder
 	model := "неизвестная модель"
@@ -886,7 +887,7 @@ func buildScript(device *Info, s *Settings, now time.Time, avail map[string]bool
 
 	if s.WAN.Enabled && avail["wan"] {
 		anyOn = true
-		buildWAN(&b, s.WAN)
+		buildWAN(&b, s.WAN, device, ifaces)
 	}
 
 	if !anyOn {
