@@ -324,18 +324,19 @@ func TestGenerate_LegacyWiFi(t *testing.T) {
 	}
 	script := res.Script
 	wantLines := []string{
+		`/interface wireless security-profiles set [find where name="mti-wifi"] mode=dynamic-keys authentication-types=wpa2-psk unicast-ciphers=aes-ccm group-ciphers=aes-ccm wpa2-pre-shared-key=passw0rd123`,
 		"для hEX S",
 		"RouterOS 7.15.3 (stable)",
 		"/ip address add address=192.168.88.1/24 interface=ether2 comment=mti-lan disabled=no",
 		"/ip pool add name=mti-pool ranges=192.168.88.2-192.168.88.254",
 		"/ip dhcp-server add name=mti-dhcp interface=ether2 address-pool=mti-pool lease-time=1d disabled=no",
-		"/ip dhcp-server-network add address=192.168.88.0/24 gateway=192.168.88.1 dns-server=8.8.8.8,8.8.4.4 comment=mti-net",
+		"/ip dhcp-server network add address=192.168.88.0/24 gateway=192.168.88.1 dns-server=8.8.8.8,8.8.4.4 comment=mti-net",
 		"/ip dns set servers=8.8.8.8,8.8.4.4 allow-remote-requests=yes",
-		"/system ntp client set enabled=yes servers=pool.ntp.org",
+		"/system ntp client servers add address=pool.ntp.org",
 		"/system clock set time-zone-name=Europe/Minsk",
 		"/interface pppoe-client add name=pppoe-out1 interface=ether1 user=ispuser password=secret123 add-default-route=yes use-peer-dns=yes dial-on-demand=no disabled=no",
 		"/ip firewall nat add chain=srcnat out-interface=pppoe-out1 action=masquerade comment=mti-pppoe",
-		`/interface wireless set wlan1 disabled=no mode=ap ssid="My Home" country=BY authentication-types=wpa2-psk passphrase=passw0rd123`,
+		`/interface wireless set wlan1 disabled=no mode=ap-bridge ssid="My Home" country=belarus security-profile=mti-wifi`,
 	}
 	for _, w := range wantLines {
 		if !strings.Contains(script, w) {
@@ -355,7 +356,7 @@ func TestGenerate_Wave2WiFi(t *testing.T) {
 		t.Fatalf("ошибки валидации: %s", res.Error)
 	}
 	for _, w := range []string{
-		"/interface wifi configuration add name=mti-wifi mode=ap ssid=\"My Home\" passphrase=passw0rd123 country=BY",
+		"/interface wifi configuration add name=mti-wifi mode=ap security.authentication-types=wpa2-psk ssid=\"My Home\" security.passphrase=passw0rd123 country=belarus",
 		"/interface wifi set wifi1 configuration=mti-wifi disabled=no",
 	} {
 		if !strings.Contains(res.Script, w) {
@@ -706,5 +707,27 @@ func TestAnalyzeFeatures_WifiQcom(t *testing.T) {
 	w := featureByID(t, feats, featWiFi)
 	if !w.Available || w.Mode != "wave2" || w.Package != "wifi-qcom" {
 		t.Errorf("wifi = %+v", w)
+	}
+}
+
+func TestDHCPNetworkAndNTPRouterOS7Paths(t *testing.T) {
+	s := fullSettings()
+	s.WiFi.Enabled = false
+	s.PPPoE.Enabled = false
+	device := deviceWith("routeros")
+	device.RouterOS = "7.22.3"
+	res := Generate(device, nil, &s, testTime())
+	if !res.OK {
+		t.Fatal(res.Error)
+	}
+	for _, bad := range []string{"/ip dhcp-server-network", "/system ntp client set enabled=yes servers="} {
+		if strings.Contains(res.Script, bad) {
+			t.Errorf("invalid path/property: %s", bad)
+		}
+	}
+	for _, want := range []string{"/ip dhcp-server network remove", "/ip dhcp-server network add", "/system ntp client servers find where address=pool.ntp.org", "/system ntp client servers add address=pool.ntp.org"} {
+		if !strings.Contains(res.Script, want) {
+			t.Errorf("missing %s", want)
+		}
 	}
 }

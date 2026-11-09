@@ -477,11 +477,54 @@
                   <label class="field">Пароль (8–63 символа)
                     <input id="wifi-pass" type="password" maxlength="63" autocomplete="new-password" placeholder="••••••••">
                   </label>
-                  <label class="field">Страна (код)
-                    <input id="wifi-country" value="BY" maxlength="2" spellcheck="false" placeholder="BY">
+                  <label class="field">Страна (название RouterOS или код)
+                    <input id="wifi-country" value="BY" spellcheck="false" placeholder="BY">
                   </label>
                 </div>
                 <div class="sec-note" id="wifi-note"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="menu-group">
+            <div class="menu-title">Интернет → WAN</div>
+            <div class="sec" data-feat="wan">
+              <label class="sec-head" for="chk-wan">
+                <input type="checkbox" id="chk-wan"><span class="sec-title">Основной и резервный IPv4-каналы</span>
+                <span class="lock" hidden></span>
+              </label>
+              <div class="sec-body">
+                <p>Основной и необязательный резервный провайдер: LTE или проводной (DHCP / статический IPv4).
+                Для PPPoE пока используется отдельный раздел. VLAN провайдера нужно создать заранее.</p>
+                <div class="grid">
+                  <label class="field"><span>Контроль интернета: 30 с без ответа → резерв, 60 с ответов → основной (RouterOS 7)</span><input type="checkbox" id="wan-failover"></label>
+                  <label class="field">Контрольный IPv4 (только через основной канал)<input id="wan-probe" value="8.8.8.8" spellcheck="false"></label>
+                </div>
+                <p>Проверка каждые 5 секунд. При включении нужны два провайдера. Проверка основного продолжается на резерве. ICMP роутера к этому узлу закрепляется за основным каналом.</p>
+                <div id="wan-links"></div>
+                <button type="button" class="ghost" id="wan-add">Добавить провайдера</button>
+                <p>Без контроля интернета: DHCP реагирует на потерю lease/link; ping шлюза проверяет только шлюз. Контрольный узел должен отвечать на ICMP.
+                Существующий DHCP-клиент выбранного порта будет включён и обновлён: default route, distance и отключение peer DNS. Его комментарий сохраняется. Проверьте существующие маршруты перед применением.
+                Настройки DNS задаются отдельно. Снятие галочки не удаляет ранее применённые настройки.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="menu-group">
+            <div class="menu-title">IP → Firewall → NAT</div>
+            <div class="sec" data-feat="portForward">
+              <label class="sec-head" for="chk-portForward">
+                <input type="checkbox" id="chk-portForward">
+                <span class="sec-title">Проброс портов и Hairpin NAT</span>
+                <span class="lock" hidden></span>
+              </label>
+              <div class="sec-body">
+                <p>Каждое правило открывает доступ к локальному сервису. Без ограничения источника — для всего интернета.
+                Проверьте порядок NAT и разрешение dstnat в цепочке forward: firewall автоматически не меняется.</p>
+                <div id="forward-rules"></div>
+                <button type="button" class="ghost" id="forward-add">Добавить правило</button>
+                <p>Hairpin требует фиксированный внешний IPv4 и подсеть LAN. Для динамического IP используйте внутренний DNS.
+                Повторное применение заменяет только правила mti-forward-*. Снятие галочки не удаляет настройки с роутера.</p>
               </div>
             </div>
           </div>
@@ -549,7 +592,7 @@
     ["uptime", "Аптайм"]
   ];
 
-  var FEATURES = ["lan", "dhcp", "dns", "ntp", "pppoe", "wifi"];
+  var FEATURES = ["lan", "dhcp", "dns", "ntp", "pppoe", "wifi", "portForward", "wan"];
   var DEFAULT_ON = ["lan", "dhcp"];
   var DEFAULTS = { "dns-remote": true, "pppoe-route": true, "pppoe-dns": true, "pppoe-nat": true };
 
@@ -757,6 +800,7 @@
 
   function applyInterfaces(list) {
     lastIfaces = list || [];
+    Array.from($("wan-links").children).forEach(function(row) { row.updateMode(); });
     var ethernet = lastIfaces;
     var wifi = lastIfaces.filter(isWifi);
 
@@ -799,10 +843,89 @@
         $("wifi-path").textContent = f.mode === "wave2" ? "/interface wifi" : "/interface wireless";
         $("wifi-note").textContent = f.mode === "wave2"
           ? "RouterOS 7: будет создан профиль mti-wifi в /interface wifi и применён к интерфейсу."
-          : "Legacy Wi-Fi: профиль mti-wifi не нужен, настройки применяются напрямую к интерфейсу.";
+          : "Legacy Wi-Fi: профиль защиты mti-wifi (WPA2/AES), режим ap-bridge.";
       }
     });
   }
+
+  function updateWANRoles() {
+    Array.from($("wan-links").children).forEach(function(row, index) {
+      row.querySelector("legend").textContent = index ? "Резервный провайдер" : "Основной провайдер";
+      row.querySelector('[data-key="distance"]').value = index + 1;
+    });
+  }
+  $("wan-add").addEventListener("click", function () {
+    if ($("wan-links").children.length >= 2) return;
+    var row = document.createElement("fieldset");
+    row.appendChild(document.createElement("legend"));
+    var grid = document.createElement("div"); grid.className = "grid";
+    [["mode", "Тип подключения", "select"], ["iface", "Интерфейс провайдера", "select"],
+     ["apn", "APN LTE (необязательно; пусто — автоматически)", "text"],
+     ["address", "Статический IPv4/CIDR", "text"], ["gateway", "Шлюз статического канала", "text"],
+     ["distance", "Приоритет (по роли провайдера)", "number"],
+     ["nat", "NAT masquerade", "checkbox"], ["checkGateway", "Ping шлюза (только static)", "checkbox"]].forEach(function (spec) {
+      var label = document.createElement("label"); label.className = "field"; label.textContent = spec[1];
+      var input = document.createElement(spec[2] === "select" ? "select" : "input");
+      if (spec[0] === "mode") [["dhcp","Проводной — DHCP"],["static","Проводной — статический IPv4"],["lte","LTE"]].forEach(function(v) {
+        var o = document.createElement("option"); o.value = v[0]; o.textContent = v[1]; input.appendChild(o);
+      }); else if (spec[2] !== "select") input.type = spec[2];
+      input.dataset.key = spec[0];
+      if (spec[0] === "distance") input.readOnly = true;
+      if (spec[0] === "nat") input.checked = true;
+      label.appendChild(input); grid.appendChild(label);
+    });
+    row.appendChild(grid);
+    row.updateMode = function () {
+      var mode = row.querySelector('[data-key="mode"]').value;
+      var lte = mode === "lte";
+      var candidates = lastIfaces.filter(function(i) {
+        var t = (i.type || "").toLowerCase();
+        return lte ? t === "lte" : t === "ether" || t === "ethernet";
+      });
+      var sel = row.querySelector('[data-key="iface"]');
+      fillSelect(sel, candidates);
+      if (lte && candidates.length) sel.value = sel.value || candidates[0].name;
+      sel.disabled = lte && candidates.length <= 1;
+      ["address", "gateway", "checkGateway", "apn"].forEach(function (key) {
+        var el = row.querySelector('[data-key="' + key + '"]');
+        var active = key === "apn" ? lte : mode === "static";
+        el.disabled = !active; el.parentElement.hidden = !active;
+        if (!active && key === "checkGateway") el.checked = false;
+      });
+    };
+    row.querySelector('[data-key="mode"]').addEventListener("change", row.updateMode); row.updateMode();
+    var remove = document.createElement("button"); remove.type = "button"; remove.className = "ghost"; remove.textContent = "Удалить провайдера";
+    remove.addEventListener("click", function () { row.remove(); updateWANRoles(); schedulePreview(); }); row.appendChild(remove);
+    row.addEventListener("input", schedulePreview); row.addEventListener("change", schedulePreview);
+    $("wan-links").appendChild(row); updateWANRoles(); schedulePreview();
+  });
+
+  $("forward-add").addEventListener("click", function () {
+    if ($("forward-rules").children.length >= 64) return;
+    var row = document.createElement("fieldset");
+    var legend = document.createElement("legend"); legend.textContent = "Правило проброса"; row.appendChild(legend);
+    var grid = document.createElement("div"); grid.className = "grid";
+    [["wan", "WAN-интерфейс (например pppoe-out1)", "text"],
+     ["protocol", "Протокол", "select"], ["externalPort", "Внешний порт", "number"],
+     ["internalIP", "Локальный IPv4 сервера", "text"], ["internalPort", "Порт сервера", "number"],
+     ["publicIP", "Внешний IPv4 (необязательно)", "text"],
+     ["source", "Разрешённый источник IPv4/CIDR (пусто = все)", "text"],
+     ["hairpin", "Hairpin: доступ из LAN по внешнему IP", "checkbox"],
+     ["lan", "Подсеть hairpin, например 192.168.88.0/24", "text"]].forEach(function (spec) {
+      var label = document.createElement("label"); label.className = "field"; label.textContent = spec[1];
+      var input = document.createElement(spec[2] === "select" ? "select" : "input");
+      if (spec[2] === "select") ["tcp", "udp"].forEach(function (v) {
+        var o = document.createElement("option"); o.value = v; o.textContent = v.toUpperCase(); input.appendChild(o);
+      }); else input.type = spec[2];
+      if (spec[2] === "number") { input.min = "1"; input.max = "65535"; }
+      input.dataset.key = spec[0]; label.appendChild(input); grid.appendChild(label);
+    });
+    row.appendChild(grid);
+    var remove = document.createElement("button"); remove.type = "button"; remove.className = "ghost"; remove.textContent = "Удалить правило";
+    remove.addEventListener("click", function () { row.remove(); schedulePreview(); }); row.appendChild(remove);
+    row.addEventListener("input", schedulePreview); row.addEventListener("change", schedulePreview);
+    $("forward-rules").appendChild(row); schedulePreview();
+  });
 
   // ------------------------------------------------------------------
   // сбор настроек
@@ -812,6 +935,20 @@
 
   function collect() {
     return {
+      wan: { enabled: chk("chk-wan"), failover: chk("wan-failover"), probeHost: val("wan-probe"), links: Array.from($("wan-links").children).map(function (row) {
+        var link = {};
+        row.querySelectorAll("[data-key]").forEach(function (el) {
+          link[el.dataset.key] = el.type === "checkbox" ? el.checked : el.type === "number" ? Number(el.value) : el.value.trim();
+        });
+        return link;
+      }) },
+      portForward: { enabled: chk("chk-portForward"), rules: Array.from($("forward-rules").children).map(function (row) {
+        var rule = {};
+        row.querySelectorAll("[data-key]").forEach(function (el) {
+          rule[el.dataset.key] = el.type === "checkbox" ? el.checked : el.value.trim();
+        });
+        return rule;
+      }) },
       lan: { enabled: chk("chk-lan"), iface: val("lan-iface"), address: val("lan-addr") },
       dhcp: {
         enabled: chk("chk-dhcp"), iface: val("dhcp-iface"),
@@ -938,7 +1075,7 @@
     });
   });
 
-  ["lan-iface", "lan-addr", "dhcp-iface", "dhcp-start", "dhcp-end", "dhcp-lease",
+  ["wan-failover", "wan-probe", "lan-iface", "lan-addr", "dhcp-iface", "dhcp-start", "dhcp-end", "dhcp-lease",
    "dns-servers", "dns-remote", "ntp-servers", "ntp-tz",
    "pppoe-iface", "pppoe-name", "pppoe-user", "pppoe-pass", "pppoe-service",
    "pppoe-route", "pppoe-dns", "pppoe-nat",
