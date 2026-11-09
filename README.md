@@ -1,7 +1,7 @@
 # MikroTik Inspector
 
-Настольная программа для **Windows** (работает также в Linux/macOS) с **HTML-интерфейсом**,
-написанная на **Go**. Подключается к роутеру MikroTik (RouterOS) и показывает:
+Программа для **Windows**, **Linux/macOS** и **Android** с **HTML-интерфейсом**,
+написанная на **Go** (Android-приложение — Go-ядро + WebView, см. раздел «Версия для Android»). Подключается к роутеру MikroTik (RouterOS) и показывает:
 
 - 📌 **модель** устройства (board-name / routerboard),
 - 📌 **версию прошивки** (RouterOS, текущая/заводская прошивка),
@@ -27,13 +27,23 @@
 | **Учёт пакетов** | Если нужного пакета на роутере нет, поле неактивно и выводится надпись «необходимый пакет отсутствует» |
 | **Приведение IP** | Поля адресов автоматически приводятся к формату IP (`192.168.001.010/024` → `192.168.1.10/24`) — и в браузере, и на сервере |
 | **Применение** | Кнопки «Скопировать для New Terminal», «Применить на роутере», «Скачать .rsc» |
+| **Android** | APK со встроенным Go-ядром: тот же интерфейс и конструктор на телефоне |
+| **PWA** | Иконка и манифест: страницу можно добавить на домашний экран Android |
 | Ноль зависимостей | Только стандартная библиотека Go |
 
 ## Готовые сборки
 
-Скачать можно в [Releases](https://github.com/zigorminsk-debug/my-mikrotik/releases)
-(`mikrotik-inspector-<версия>-windows-amd64.exe`) или в артефактах запуска CI
-(**Actions → запуск → Artifacts**).
+Скачать можно в [Releases](https://github.com/zigorminsk-debug/my-mikrotik/releases):
+
+| Платформа | Файл |
+|---|---|
+| Windows | `mikrotik-inspector-<версия>-windows-amd64.exe` |
+| Linux | `mikrotik-inspector-<версия>-linux-amd64` |
+| Android | `mikrotik-inspector-<версия>-android.apk` |
+| Контрольные суммы | `SHA256SUMS.txt`, `SHA256SUMS-android.txt` |
+
+Свежие сборки также лежат в артефактах запусков (**Actions → запуск → Artifacts**):
+`android-apk` — из workflow «Android APK».
 
 ## Сборка
 
@@ -143,12 +153,95 @@ RouterOS, а доступность пунктов зависит от данн�
 > Ничего не применяется автоматически: кнопка «Применить» спрашивает подтверждение,
 > а скрипт доступен для просмотра и ручной вставки.
 
+## Версия для Android
+
+Приложение для Android использует то же ядро, что и настольная версия, и тот же
+HTML-интерфейс. Внутри процесса поднимается локальный HTTP-сервер
+(`127.0.0.1:8765`), а системный WebView показывает страницу. Все обращения к роутеру
+выполняет Go — интерфейс лишь отображает результат, поэтому мобильная версия
+функционально не отличается от настольной (модель, прошивка, пакеты, конструктор,
+применение настроек).
+
+```
+android/
+├── bridge/bridge.go     # Go-ядро: Start/URL/Version/LocalURLs (gomobile bind)
+├── app/                 # Java-обвязка: MainActivity с WebView, манифест, ресурсы
+│   ├── build.gradle     # AGP 8.6.1, minSdk 21, targetSdk 34
+│   └── src/main/java/com/mikrotik/inspector/MainActivity.java
+├── tools.go             # удерживает golang.org/x/mobile в графе модуля
+└── go.mod               # отдельный модуль, заменяет корневой через replace ../
+```
+
+### Установка на телефон
+
+1. Скачайте `mikrotik-inspector-<версия>-android.apk` из
+   [Releases](https://github.com/zigorminsk-debug/my-mikrotik/releases) или из
+   артефакта `android-apk` запуска workflow «Android APK».
+2. Разрешите установку из неизвестных источников (APK подписан отладочным ключом —
+   этого достаточно для личного использования).
+3. Телефон и роутер должны быть в одной сети (Wi-Fi роутера). Войдите под
+   администратором; для API включите `/ip service set api` (8728), для REST —
+   `/ip service set www` (80).
+
+Приложение не требует root и не использует сторонние сервисы: пароль уходит
+только на роутер.
+
+### Что нужно знать
+
+- **minSdk 21** (Android 5.0), поддерживаются ABI `arm`, `arm64`, `amd64`.
+- Интерфейс адаптирован под узкий экран: вкладки, вертикальная раскладка
+  «меню → предпросмотр», поля ввода с мобильной клавиатурой.
+- Кнопка «Назад» работает как навигация внутри WebView.
+- Дополнительно страницу можно открыть с компьютера: если запустить настольную
+  версию с `-addr 0.0.0.0:8080`, в логах печатаются адреса вида
+  `http://192.168.88.10:8080`.
+
+### Как собирается APK
+
+APK требует Android SDK, NDK, JDK и `gomobile`, поэтому собирается на GitHub
+(workflow `.github/workflows/android.yml`, запускается автоматически при изменениях
+в `android/`, `internal/`, `web/`, `mikrotik/` и по тегу `v*`):
+
+```bash
+# 1. Go-ядро → bridge.aar (на раннере уже есть SDK и NDK)
+cd android && gomobile init
+gomobile bind -target=android/arm,android/arm64,android/amd64 -androidapi 21 \
+  -javapkg=com.mikrotik.inspector -o app/libs/bridge.aar \
+  github.com/zigorminsk-debug/my-mikrotik/android/bridge
+
+# 2. AAR + Java → APK
+gradle -p . :app:assembleDebug -PappVersion=0.3.0 -PversionCode=3
+# результат: android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+Важные детали, на которых сборка спотыкалась (см. `docs/STEPS.md`, этап 3):
+
+| Проблема | Решение |
+|---|---|
+| `gomobile: missing golang.org/x/mobile dependency` | `tools.go` + `go get golang.org/x/mobile@latest` в CI |
+| Java не видит класс `Bridge` | `-javapkg=com.mikrotik.inspector` при `gomobile bind` |
+| `resource mipmap/ic_launcher not found` | PNG-иконки в `res/mipmap-*` (генерируются Go-кодом) |
+| нет NDK на раннере | шаг `sdkmanager --install "ndk;26.1.10909125"` |
+
+Подпись релиза: если в секретах репозитория заданы `ANDROID_KEYSTORE_BASE64`,
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, workflow
+дополнительно собирает и подписывает release-APK; иначе публикуется debug-APK
+(устанавливается на телефон).
+
 ## Архитектура
 
 ```
 my-mikrotik/
-├── main.go                    # точка входа: HTTP-сервер GUI, встраивание web/, открытие браузера
-├── web/index.html             # весь HTML/CSS/JS интерфейс (встраивается в бинарник через embed)
+├── main.go                    # точка входа настольной версии: сервер, открытие браузера
+├── internal/server/           # общий HTTP-слой: API, иконки, манифест PWA
+│   ├── server.go              # маршруты /api/*, заголовки безопасности, LocalURLs
+│   └── icon.go                # генератор иконок (PNG без внешних зависимостей)
+├── web/                       # интерфейс (встраивается в бинарник через embed)
+│   ├── embed.go               # экспортирует встроенные файлы
+│   └── index.html             # HTML/CSS/JS: вкладки «Информация» и «Конструктор»
+├── android/                   # Android-приложение (отдельный Go-модуль)
+│   ├── bridge/bridge.go       # Go-ядро для gomobile bind
+│   ├── app/                   # Java-обвязка (WebView) + ресурсы + Gradle
 ├── mikrotik/
 │   ├── proto.go               # кодек бинарного протокола RouterOS API (длина слова, предложения)
 │   ├── api.go                 # клиент RouterOS API: вход (modern + challenge), чтение данных
@@ -160,8 +253,9 @@ my-mikrotik/
 │   ├── mikrotik_test.go       # тесты сбора данных: кодек, mock API/REST, авторизация
 │   └── config_test.go         # тесты конструктора: подсеть, доступность, генерация, применение
 ├── .github/workflows/
-│   ├── ci.yml                 # gofmt + vet + go test -race + сборка Linux/Windows (артефакты)
-│   └── release.yml            # на тег v*: сборка exe + GitHub Release с SHA256SUMS
+│   ├── ci.yml                 # gofmt + vet + go test -race + проверка Android-кода + сборка Linux/Windows
+│   ├── android.yml            # сборка APK (gomobile bind + Gradle), артефакт и Release
+│   └── release.yml            # на тег v*: exe для Windows/Linux + GitHub Release с SHA256SUMS
 ├── docs/STEPS.md              # пошаговый журнал разработки
 └── go.mod                     # модуль без внешних зависимостей
 ```
@@ -204,6 +298,17 @@ gh run download             # скачать собранные артефакт
 
 Артефакты также доступны в UI: **Actions → запуск → Artifacts**.
 
+### Android APK (`.github/workflows/android.yml`)
+
+Запускается при изменениях в `android/`, `internal/`, `web/`, `mikrotik/`, по тегу `v*`
+и вручную (`workflow_dispatch`). Собирает `bridge.aar` через `gomobile bind`, затем APK
+через Gradle, публикует артефакт `android-apk` и (для тега) файл в GitHub Release.
+
+```bash
+gh run list --workflow="Android APK"        # история сборок APK
+gh workflow run "Android APK"                # запустить вручную
+```
+
 ### Релизы (`.github/workflows/release.yml`)
 
 ```bash
@@ -235,7 +340,13 @@ go test -v ./mikrotik/
 - **сеть** — чтение интерфейсов по API и REST, применение скрипта по API (порядок
   remove → add → run с игнорированием ошибки remove) и по REST (`{"number":"mti-apply"}`).
 
-Всего 34 теста; интерфейс дополнительно проверяется сценарием на jsdom
+- **серверный слой** — отдача страницы, иконки PNG (декодирование и размеры),
+  манифест PWA, коды ошибок `/api/*`, сквозной сценарий конструктора по HTTP,
+  адреса локальной сети;
+- **Go-ядро Android** — запуск сервера `bridge.StartOn`, отдача интерфейса и
+  ответ `/api/config` (проверяется без телефона).
+
+Всего 40+ тестов; интерфейс дополнительно проверяется сценарием на jsdom
 (подключение → блокировка недоступного пункта → авторамат IP → предпросмотр → применение).
 
 ## Документация

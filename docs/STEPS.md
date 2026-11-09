@@ -342,6 +342,94 @@ Wi-Fi legacy/wave2, «пакет есть — интерфейсов нет», �
 
 ---
 
+# Этап 3. Версия для Android (v0.3.0)
+
+Задача: сделать версию программы для Android — с тем же интерфейсом, конструктором
+и применением настроек на роутере.
+
+## Шаг 1. Проверка окружения и выбор подхода
+
+| Проверка | Результат |
+|---|---|
+| `java`, `gradle`, `aapt2`, `sdkmanager` в песочнице | отсутствуют |
+| `go tool dist list` | `android/386`, `android/amd64`, `android/arm`, `android/arm64` |
+| сборка `GOOS=android GOARCH=arm64` | успешно (ELF, 7,9 МБ) |
+
+Вывод: APK нельзя собрать локально (нет SDK/NDK/JDK), но Go компилирует под Android,
+а на GitHub-раннере `ubuntu-latest` есть и Android SDK, и JDK 17. Поэтому APK
+собирается в CI, а в репозитории хранится только исходный код.
+
+**Выбранная архитектура:** Go-ядро (HTTP-сервер + вся работа с RouterOS) компилируется
+внутрь APK через `gomobile bind`; Java-обвязка запускает его и показывает
+`http://127.0.0.1:8765/` в WebView. Плюсы: один и тот же код и интерфейс на всех
+платформах, нет дублирования логики, нет WebView-моста с ручной сериализацией.
+
+## Шаг 2. Рефакторинг под две платформы
+
+- `internal/server` — вынесен общий HTTP-слой (`NewMux`, все `/api/*`, заголовки
+  безопасности, `LocalURLs`, `ListenAndServe`).
+- `web/embed.go` — встраиваемые файлы интерфейса вынесены в отдельный пакет,
+  чтобы их использовали и десктоп, и Android.
+- `internal/server/icon.go` — иконки рисуются программно (PNG, суперсэмплинг 4×4,
+  без внешних зависимостей): одна и та же иконка в браузере, в PWA-манифесте и в APK.
+- `main.go` сокращён до запуска сервера и открытия браузера.
+
+Проверено: `go vet ./...`, тесты зелёные, десктопная сборка работает.
+
+## Шаг 3. Go-ядро для Android (`android/bridge`)
+
+Отдельный Go-модуль `android/` с `replace ../`:
+
+```go
+func Start(port int) string       // запуск сервера, "" при успехе
+func StartOn(addr string) (string, error) // для тестов (порт 0)
+func URL(port int) string
+func Version() string
+func LocalURLs(port int) string
+```
+
+`gomobile bind` превращает пакет в Java-класс; тест `bridge_test.go` проверяет запуск
+сервера и ответ `/api/config` без всякого Android.
+
+## Шаг 4. Java-обвязка и ресурсы
+
+- `MainActivity.java` — WebView на весь экран, `setJavaScriptEnabled`,
+  `setDomStorageEnabled` (сохранение адреса/логина), внешние ссылки открываются
+  в браузере, кнопка «Назад» — навигация внутри страницы.
+- `AndroidManifest.xml` — `INTERNET`, `usesCleartextTraffic` (RouterOS по HTTP),
+  тема без ActionBar, `configChanges` (поворот экрана не перезапускает Go).
+- `res/mipmap-*` — иконки 48/72/96/144/192 px, сгенерированы тем же Go-кодом.
+- Gradle 8.7 + AGP 8.6.1, `minSdk 21`, `targetSdk 34`, подпись debug-ключом;
+  release-подпись — из секретов, если заданы.
+
+## Шаг 5. Отладка сборки APK на GitHub
+
+Сборка заняла несколько итераций; журнал запуска GitHub из среды разработки
+недоступен (blob-хосты блокируются), поэтому причины искались через аннотации
+check-run API — они отдаются `api.github.com`.
+
+| Ошибка | Причина | Исправление |
+|---|---|---|
+| `gomobile init` падал | не был установлен NDK | шаг `sdkmanager --install "ndk;26.1.10909125"` |
+| `missing golang.org/x/mobile dependency` | `gomobile bind` требует модуль в графе | `android/tools.go` (тег `tools`) + `go get x/mobile@latest` в CI |
+| `golang.org/x/mobile@...: unknown revision` | в `go.mod` была вымышленная псевдо-версия | версия больше не фиксируется в репозитории, ставится в CI |
+| `resource mipmap/ic_launcher not found` | в ресурсах не было иконки | PNG-иконки в `res/mipmap-*` |
+| Java: `package com.mikrotik.inspector.bridge does not exist` | `gomobile` кладёт классы в пакет по имени Go-пакета (`bridge`) | `-javapkg=com.mikrotik.inspector` в `gomobile bind` |
+| «APK не найден» после успешного Gradle | неверный путь поиска артефакта | поиск `find android -name "*.apk"`, отдельный шаг проверки |
+
+Итог: запуск `42524254163` — **`success`**, артефакт `android-apk` загружен,
+собран `mikrotik-inspector-0.3.0-dev.<N>-android.apk` (≈10 МБ, три ABI).
+
+## Шаг 6. Общий интерфейс и PWA
+
+- В `web/index.html` добавлены `manifest.webmanifest`, иконки и `theme-color` —
+  страницу можно добавить на домашний экран Android.
+- `/icon.png`, `/icon-192.png`, `/icon-512.png` отдаются сервером.
+- Настольная версия при запуске с `-addr 0.0.0.0` печатает адреса для доступа
+  с телефона.
+
+---
+
 ## Полезные команды
 
 ```bash

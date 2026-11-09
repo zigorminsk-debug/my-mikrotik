@@ -54,12 +54,18 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      - name: gofmt, vet и сборка bridge под Android
+      - name: gofmt, vet, тесты и сборка bridge под Android
         working-directory: android
+        env:
+          # golang.org/x/mobile подтягивается как зависимость (нужна gomobile bind).
+          GOFLAGS: -mod=mod
         run: |
+          go get golang.org/x/mobile@latest
+          go mod tidy
           gofmt -l . | tee /tmp/fmt.txt
           test ! -s /tmp/fmt.txt
           go vet ./...
+          go test -count=1 ./...
           CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build ./bridge
           CGO_ENABLED=0 GOOS=android GOARCH=arm go build ./bridge
 
