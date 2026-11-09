@@ -67,6 +67,7 @@ type WiFiSettings struct {
 
 // Settings — все настройки конструктора.
 type Settings struct {
+	GeoNAT           GeoNATSettings          `json:"geoNat"`
 	Security         SecuritySettings        `json:"security"`
 	LAN              LanSettings             `json:"lan"`
 	DHCP             DHCPSettings            `json:"dhcp"`
@@ -209,6 +210,7 @@ func AnalyzeFeatures(device *Info, ifaces []Iface) []FeatureInfo {
 	wifiIface := hasAnyIface(ifaces, IsWiFiIface)
 
 	features := []FeatureInfo{
+		{ID: "geoNat", Title: "Белый список для dst-nat", Path: "/ip firewall filter", Package: "system", Available: has("system"), Reason: reasonIf(!has("system"), "system")},
 		{ID: "security", Title: "Защита WAN и WinBox", Path: "/ip firewall filter", Package: "system", Available: has("system"), Reason: reasonIf(!has("system"), "system")},
 		{ID: featLAN, Title: "Адреса и подсеть", Path: "/ip address",
 			Package: "system", Available: has("system") || device == nil,
@@ -725,6 +727,9 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 		}
 	}
 
+	if s.GeoNAT.Enabled && avail["geoNat"] {
+		errs = append(errs, validateGeoNAT(s.GeoNAT, ifaces, s)...)
+	}
 	if s.Security.Enabled && avail["security"] {
 		errs = append(errs, validateSecurity(s.Security, ifaces, s)...)
 	}
@@ -760,6 +765,8 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 			enabled = s.PPPoE.Enabled
 		case featWiFi:
 			enabled = s.WiFi.Enabled
+		case "geoNat":
+			enabled = s.GeoNAT.Enabled
 		case "security":
 			enabled = s.Security.Enabled
 		case "wgServer":
@@ -966,6 +973,10 @@ func buildScript(device *Info, s *Settings, now time.Time, avail map[string]bool
 	if s.PPTP.Enabled && avail["pptp"] {
 		anyOn = true
 		writeVPNClient(&b, s.PPTP, false)
+	}
+	if s.GeoNAT.Enabled && avail["geoNat"] {
+		anyOn = true
+		writeGeoNAT(&b, s.GeoNAT, now)
 	}
 	if s.Security.Enabled && avail["security"] {
 		anyOn = true

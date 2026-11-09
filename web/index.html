@@ -62,7 +62,7 @@
     gap: 14px 16px;
   }
   label.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
-  input, select {
+  input, select, textarea {
     font: inherit;
     padding: 9px 11px;
     border: 1px solid var(--border);
@@ -72,8 +72,8 @@
     outline: none;
     transition: border-color .15s, box-shadow .15s;
   }
-  input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37, 99, 235, .15); background: #fff; }
-  input:disabled, select:disabled { background: #f1f5f9; color: #94a3b8; cursor: not-allowed; }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37, 99, 235, .15); background: #fff; }
+  input:disabled, select:disabled, textarea:disabled { background: #f1f5f9; color: #94a3b8; cursor: not-allowed; }
   .row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
   .checkbox { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink); font-weight: 500; cursor: pointer; user-select: none; }
   .checkbox input { width: 16px; height: 16px; accent-color: var(--accent); }
@@ -500,6 +500,28 @@
             </div>
           </div>
 
+          <div class="menu-group"><div class="menu-title">Доступ к ресурсам за NAT</div>
+            <div class="sec" data-feat="geoNat">
+              <label class="sec-head" for="chk-geoNat"><input type="checkbox" id="chk-geoNat"><span class="sec-title">Белый список для проброшенного ресурса</span><span class="sec-path mono">/ip firewall filter</span><span class="lock" hidden></span></label>
+              <div class="sec-body">
+                <div class="grid">
+                  <label class="field">Идентификатор ресурса (латиница, до 20 знаков)<input id="geo-id" placeholder="server1" spellcheck="false"></label>
+                  <label class="field">Внешний WAN-интерфейс<select id="geo-wan"></select></label>
+                  <label class="field">Внутренний IPv4 после dst-nat<input id="geo-destination" placeholder="192.168.88.10" spellcheck="false"></label>
+                  <label class="field">Внутренний порт после dst-nat<input id="geo-port" type="number" min="1" max="65535" placeholder="443"></label>
+                  <label class="field">Протокол<select id="geo-protocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select></label>
+                  <label class="field">Дополнительные IPv4 / CIDR (через запятую или с новой строки)<textarea id="geo-manual" rows="3" placeholder="203.0.113.5, 198.51.100.0/24" spellcheck="false"></textarea></label>
+                </div>
+                <label class="field">Поиск страны<input id="geo-search" placeholder="Название или код страны" autocomplete="off"></label>
+                <div id="geo-country-list" style="max-height:180px;overflow:auto;border:1px solid #cbd5e1;padding:8px" aria-label="Выбор стран"></div>
+                <div class="actions"><button type="button" class="ghost" id="geo-load">Загрузить IP выбранных стран</button></div>
+                <div id="geo-status" class="sec-note">Страны можно не выбирать, если указаны отдельные адреса.</div>
+                <label class="checkbox"><input type="checkbox" id="geo-ack"> Я проверил ресурс, WAN-интерфейс и сохранил резервную копию</label>
+                <div class="sec-note">Выключите другие разделы: это отдельный скрипт для одного существующего dst-nat, он не создаёт проброс. Правила затрагивают только выбранный WAN, внутренний IPv4, порт и протокол; их accept имеет приоритет над существующими правилами. Все пробросы на этот внутренний адрес и порт через выбранный WAN попадут под правило, независимо от внешнего порта. IPv6, непроброшенные соединения и другие WAN не защищены. Уже работающие FastTrack-соединения могут сохраняться до очистки conntrack. Для каждого другого ресурса используйте отдельный идентификатор. Страны определяются по RIR-делегированию адресов: геолокация приблизительная, VPN/proxy её обходят. Обновляйте список вручную (кэш данных — 12 часов). Кнопка «Применить» для этого раздела отключена. Большие скрипты загружайте как .rsc и импортируйте локально; Safe Mode не рассчитан на тысячи изменений.</div>
+              </div>
+            </div>
+          </div>
+
           <div class="menu-group"><div class="menu-title">VPN</div>
 <div class="sec" data-feat="wgServer"><label class="sec-head" for="chk-wgServer"><input type="checkbox" id="chk-wgServer"><span class="sec-title">WireGuard — MikroTik сервер</span><span class="sec-path mono">/interface wireguard</span><span class="lock" hidden></span></label><div class="sec-body"><div class="grid"><label class="field">Приватный ключ этого MikroTik<input id="wgServer-privateKey" type="password" value="" autocomplete="off" spellcheck="false"></label><label class="field">Публичный ключ другой стороны<input id="wgServer-publicKey" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">Адрес интерфейса с маской<input id="wgServer-address" type="text" value="10.10.10.1/24" autocomplete="off" spellcheck="false"></label><label class="field">Allowed Address: сети другой стороны (CIDR)<input id="wgServer-allowedIPs" type="text" value="10.10.10.2/32" autocomplete="off" spellcheck="false"></label><label class="field">Локальный UDP-порт<input id="wgServer-listenPort" type="number" min="1" max="65535" value="13231" autocomplete="off" spellcheck="false"></label></div><div class="sec-note">WireGuard использует только UDP. Порты можно изменить; порт сервера в клиенте должен совпадать с локальным портом сервера. Ключи создайте заранее. На сервере разрешите входящий UDP-порт; маршруты и firewall на обеих сторонах настройте отдельно. Создаётся один peer. Повторное применение требует ручного удаления созданного интерфейса.</div></div></div>
 <div class="sec" data-feat="wgClient"><label class="sec-head" for="chk-wgClient"><input type="checkbox" id="chk-wgClient"><span class="sec-title">WireGuard — MikroTik клиент</span><span class="sec-path mono">/interface wireguard</span><span class="lock" hidden></span></label><div class="sec-body"><div class="grid"><label class="field">Приватный ключ этого MikroTik<input id="wgClient-privateKey" type="password" value="" autocomplete="off" spellcheck="false"></label><label class="field">Публичный ключ другой стороны<input id="wgClient-publicKey" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">Адрес интерфейса с маской<input id="wgClient-address" type="text" value="10.10.10.2/24" autocomplete="off" spellcheck="false"></label><label class="field">Allowed Address: сети другой стороны (CIDR)<input id="wgClient-allowedIPs" type="text" value="10.10.10.0/24" autocomplete="off" spellcheck="false"></label><label class="field">Локальный UDP-порт<input id="wgClient-listenPort" type="number" min="1" max="65535" value="13231" autocomplete="off" spellcheck="false"></label><label class="field">Адрес сервера<input id="wgClient-endpoint" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">UDP-порт сервера<input id="wgClient-endpointPort" type="number" min="1" max="65535" value="13231" autocomplete="off" spellcheck="false"></label></div><div class="sec-note">WireGuard использует только UDP. Порты можно изменить; порт сервера в клиенте должен совпадать с локальным портом сервера. Ключи создайте заранее. На сервере разрешите входящий UDP-порт; маршруты и firewall на обеих сторонах настройте отдельно. Создаётся один peer. Повторное применение требует ручного удаления созданного интерфейса.</div></div></div>
@@ -581,7 +603,7 @@
     ["uptime", "Аптайм"]
   ];
 
-  var FEATURES = ["lan", "dhcp", "dns", "ntp", "pppoe", "wifi", "wgServer", "wgClient", "openvpn", "pptp", "ovpnCertificates", "security"];
+  var FEATURES = ["lan", "dhcp", "dns", "ntp", "pppoe", "wifi", "wgServer", "wgClient", "openvpn", "pptp", "ovpnCertificates", "security", "geoNat"];
   var DEFAULT_ON = ["lan", "dhcp"];
   var DEFAULTS = { "dns-remote": true, "pppoe-route": true, "pppoe-dns": true, "pppoe-nat": true };
 
@@ -800,6 +822,7 @@
       o.textContent = i.name + ifaceTypeLabel(i) + (i.disabled ? " · выключен" : "");
       o.disabled = !!i.disabled; o.selected = chosen.indexOf(i.name) >= 0 && !i.disabled; wanSelect.appendChild(o);
     });
+    fillSelect($("geo-wan"), ethernet, null);
     fillSelect($("pppoe-iface"), ethernet, preferEther);
     fillSelect($("lan-iface"), ethernet, preferLan);
     fillSelect($("dhcp-iface"), ethernet, preferLan);
@@ -858,6 +881,7 @@
   }
   function collect() {
     return {
+      geoNat: {enabled: chk("chk-geoNat"), resource: val("geo-id"), wan: val("geo-wan"), destination: val("geo-destination"), port: val("geo-port"), protocol: val("geo-protocol"), countries: selectedGeoCountries(), countryPrefixes: loadedGeoKey === selectedGeoCountries().join(",") ? geoPrefixes : [], manual: $("geo-manual").value, acknowledged: chk("geo-ack")},
       security: {enabled: chk("chk-security"), wan: Array.from($("security-wan").selectedOptions).map(function (o) { return o.value; }), trusted: val("security-trusted"), winboxPort: val("security-port"), acknowledged: chk("security-ack")},
       lan: { enabled: chk("chk-lan"), iface: val("lan-iface"), address: val("lan-addr") },
       dhcp: {
@@ -891,7 +915,7 @@
 
   function setActions(enabled) {
     ["btn-copy", "btn-download"].forEach(function (id) { $(id).disabled = !enabled; });
-    $("btn-apply").disabled = !enabled || chk("chk-security");
+    $("btn-apply").disabled = !enabled || chk("chk-security") || chk("chk-geoNat");
   }
 
   // ------------------------------------------------------------------
@@ -899,6 +923,10 @@
   // ------------------------------------------------------------------
   function schedulePreview() {
     clearTimeout(previewTimer);
+    previewSeq++; // сразу делаем предыдущий результат недействительным
+    currentScript = "";
+    setActions(false);
+    if (lastInfo) setScriptState("обновление…");
     previewTimer = setTimeout(preview, 220);
   }
 
@@ -930,8 +958,8 @@
           err.style.display = "none";
           err.textContent = "";
           currentScript = res.script || "";
-          $("script").textContent = currentScript;
-          setScriptState("готов к применению", "good");
+          $("script").textContent = currentScript.length > 30000 ? currentScript.slice(0, 30000) + "\n\n# Предпросмотр сокращён. Полный скрипт доступен в .rsc и при копировании." : currentScript;
+          setScriptState(chk("chk-geoNat") ? "готов к скачиванию" : "готов к применению", "good");
           setActions(currentScript.indexOf("# Настройки не выбраны") < 0);
           if (currentScript.indexOf("# Настройки не выбраны") >= 0) setScriptState("нет включённых разделов");
         }
@@ -968,6 +996,45 @@
         setActions(false);
       });
   }
+
+  // Страны загружаются только по запросу; список привязан к текущему выбору.
+  var geoCountries = [], geoSelected = {}, geoPrefixes = [], loadedGeoKey = "", geoLoadSequence = 0;
+  function selectedGeoCountries() { return Object.keys(geoSelected).filter(function (c) { return geoSelected[c]; }).sort(); }
+  function renderGeoCountries() {
+    var list = $("geo-country-list"), query = val("geo-search").toLowerCase(); list.textContent = "";
+    var names = typeof Intl.DisplayNames === "function" ? new Intl.DisplayNames(["ru"], {type:"region"}) : null;
+    geoCountries.forEach(function (code) {
+      var labelText = (names ? names.of(code.toUpperCase()) : code.toUpperCase()) + " (" + code.toUpperCase() + ")";
+      if (labelText.toLowerCase().indexOf(query) < 0) return;
+      var label = document.createElement("label"); label.className = "checkbox"; label.style.display = "block";
+      var input = document.createElement("input"); input.type = "checkbox"; input.checked = !!geoSelected[code];
+      input.addEventListener("change", function () {
+        geoSelected[code] = input.checked; geoPrefixes = []; loadedGeoKey = ""; geoLoadSequence++;
+        $("geo-status").textContent = "Выбор изменён: загрузите IP выбранных стран заново."; schedulePreview();
+      });
+      label.appendChild(input); label.appendChild(document.createTextNode(" " + labelText)); list.appendChild(label);
+    });
+  }
+  $("geo-search").addEventListener("input", renderGeoCountries);
+  fetch("/api/geo/countries").then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }).then(function (data) {
+    if (!data.ok) throw new Error(data.error || "ошибка"); geoCountries = data.countries || []; renderGeoCountries();
+  }).catch(function (e) { $("geo-status").textContent = "Не удалось получить список стран: " + (e.message || e); });
+  $("geo-load").addEventListener("click", function () {
+    var countries = selectedGeoCountries(), btn = this, seq = ++geoLoadSequence;
+    geoPrefixes = []; loadedGeoKey = ""; schedulePreview();
+    if (!countries.length) { $("geo-status").textContent = "Выберите хотя бы одну страну или используйте только отдельные адреса."; return; }
+    if (countries.length > 12) { $("geo-status").textContent = "Можно выбрать не более 12 стран."; return; }
+    btn.disabled = true; $("geo-status").textContent = "Загрузка сетей из ipverse…";
+    fetch("/api/geo/prefixes", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({countries:countries})})
+      .then(function (r) { return r.json(); }).then(function (data) {
+        if (seq !== geoLoadSequence) return;
+        if (!data.ok) throw new Error(data.error || "ошибка загрузки");
+        geoPrefixes = data.prefixes || []; loadedGeoKey = countries.join(",");
+        $("geo-status").textContent = "Загружено сетей: " + geoPrefixes.length + "; получено " + data.fetchedAt + ". Источник — ipverse/RIR.";
+        schedulePreview();
+      }).catch(function (e) { if (seq === geoLoadSequence) { $("geo-status").textContent = "Ошибка загрузки: " + (e.message || e); schedulePreview(); } })
+      .finally(function () { btn.disabled = false; });
+  });
 
   // ------------------------------------------------------------------
   // обработчики конструктора
@@ -1008,6 +1075,9 @@
   });
 
   ["security-wan", "security-trusted", "security-port", "security-ack"].forEach(function (id) {
+    $(id).addEventListener("input", schedulePreview); $(id).addEventListener("change", schedulePreview);
+  });
+  ["geo-id", "geo-wan", "geo-destination", "geo-port", "geo-protocol", "geo-manual", "geo-ack"].forEach(function (id) {
     $(id).addEventListener("input", schedulePreview); $(id).addEventListener("change", schedulePreview);
   });
   $("openvpn-protocol").addEventListener("change", schedulePreview);
@@ -1264,7 +1334,7 @@
   });
 
   $("btn-apply").addEventListener("click", function () {
-    if (!currentScript || chk("chk-security")) return;
+    if (!currentScript || chk("chk-security") || chk("chk-geoNat")) return;
     var host = $("host").value.trim();
     var ok = window.confirm(
       "Применить настройки на роутере " + host + "?\n\n" +

@@ -17,7 +17,7 @@ type SecuritySettings struct {
 
 func validateSecurity(s SecuritySettings, ifaces []Iface, settings *Settings) []string {
 	var errs []string
-	if settings.LAN.Enabled || settings.DHCP.Enabled || settings.DNS.Enabled || settings.NTP.Enabled || settings.PPPoE.Enabled || settings.WiFi.Enabled || settings.WGServer.Enabled || settings.WGClient.Enabled || settings.OpenVPN.Enabled || settings.PPTP.Enabled || settings.OVPNCertificates.Enabled {
+	if settings.GeoNAT.Enabled || settings.LAN.Enabled || settings.DHCP.Enabled || settings.DNS.Enabled || settings.NTP.Enabled || settings.PPPoE.Enabled || settings.WiFi.Enabled || settings.WGServer.Enabled || settings.WGClient.Enabled || settings.OpenVPN.Enabled || settings.PPTP.Enabled || settings.OVPNCertificates.Enabled {
 		errs = append(errs, "Защита: выключите остальные разделы и применяйте защиту отдельным скриптом")
 	}
 	if !s.Acknowledged {

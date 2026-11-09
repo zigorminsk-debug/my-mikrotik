@@ -55,6 +55,8 @@ func NewMux(opt Options) http.Handler {
 	mux.HandleFunc("/api/info", handleInfo(ver))
 	mux.HandleFunc("/api/interfaces", handleInterfaces(ver))
 	mux.HandleFunc("/api/config", handleConfig)
+	mux.HandleFunc("/api/geo/countries", handleGeoCountries)
+	mux.HandleFunc("/api/geo/prefixes", handleGeoPrefixes)
 	mux.HandleFunc("/api/apply", handleApply(ver))
 
 	return withSecurityHeaders(mux)
@@ -168,7 +170,7 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req mikrotik.ConfigRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 8<<20)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, apiResponse{OK: false, Error: "некорректный запрос: " + err.Error()})
 		return
 	}
