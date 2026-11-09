@@ -477,8 +477,8 @@
                   <label class="field">Пароль (8–63 символа)
                     <input id="wifi-pass" type="password" maxlength="63" autocomplete="new-password" placeholder="••••••••">
                   </label>
-                  <label class="field">Страна (код)
-                    <input id="wifi-country" value="BY" maxlength="2" spellcheck="false" placeholder="BY">
+                  <label class="field">Страна (название RouterOS или код)
+                    <input id="wifi-country" value="BY" spellcheck="false" placeholder="BY">
                   </label>
                 </div>
                 <div class="sec-note" id="wifi-note"></div>
@@ -837,7 +837,7 @@
         $("wifi-path").textContent = f.mode === "wave2" ? "/interface wifi" : "/interface wireless";
         $("wifi-note").textContent = f.mode === "wave2"
           ? "RouterOS 7: будет создан профиль mti-wifi в /interface wifi и применён к интерфейсу."
-          : "Legacy Wi-Fi: профиль mti-wifi не нужен, настройки применяются напрямую к интерфейсу.";
+          : "Legacy Wi-Fi: профиль защиты mti-wifi (WPA2/AES), режим ap-bridge.";
       }
     });
   }

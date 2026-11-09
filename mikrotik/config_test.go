@@ -324,6 +324,7 @@ func TestGenerate_LegacyWiFi(t *testing.T) {
 	}
 	script := res.Script
 	wantLines := []string{
+		`/interface wireless security-profiles set [find where name="mti-wifi"] mode=dynamic-keys authentication-types=wpa2-psk unicast-ciphers=aes-ccm group-ciphers=aes-ccm wpa2-pre-shared-key=passw0rd123`,
 		"для hEX S",
 		"RouterOS 7.15.3 (stable)",
 		"/ip address add address=192.168.88.1/24 interface=ether2 comment=mti-lan disabled=no",
@@ -335,7 +336,7 @@ func TestGenerate_LegacyWiFi(t *testing.T) {
 		"/system clock set time-zone-name=Europe/Minsk",
 		"/interface pppoe-client add name=pppoe-out1 interface=ether1 user=ispuser password=secret123 add-default-route=yes use-peer-dns=yes dial-on-demand=no disabled=no",
 		"/ip firewall nat add chain=srcnat out-interface=pppoe-out1 action=masquerade comment=mti-pppoe",
-		`/interface wireless set wlan1 disabled=no mode=ap ssid="My Home" country=BY authentication-types=wpa2-psk passphrase=passw0rd123`,
+		`/interface wireless set wlan1 disabled=no mode=ap-bridge ssid="My Home" country=belarus security-profile=mti-wifi`,
 	}
 	for _, w := range wantLines {
 		if !strings.Contains(script, w) {
@@ -355,7 +356,7 @@ func TestGenerate_Wave2WiFi(t *testing.T) {
 		t.Fatalf("ошибки валидации: %s", res.Error)
 	}
 	for _, w := range []string{
-		"/interface wifi configuration add name=mti-wifi mode=ap ssid=\"My Home\" passphrase=passw0rd123 country=BY",
+		"/interface wifi configuration add name=mti-wifi mode=ap security.authentication-types=wpa2-psk ssid=\"My Home\" security.passphrase=passw0rd123 country=belarus",
 		"/interface wifi set wifi1 configuration=mti-wifi disabled=no",
 	} {
 		if !strings.Contains(res.Script, w) {

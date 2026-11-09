@@ -865,18 +865,17 @@ func buildScript(device *Info, s *Settings, now time.Time, avail map[string]bool
 		ifs := strings.TrimSpace(s.WiFi.Interface)
 		if wifiMode == "wave2" {
 			fmt.Fprintf(&b, "/interface wifi configuration remove [find name=mti-wifi]\n")
-			fmt.Fprintf(&b, "/interface wifi configuration add %s mode=ap %s %s %s\n",
+			fmt.Fprintf(&b, "/interface wifi configuration add %s mode=ap security.authentication-types=wpa2-psk %s %s %s\n",
 				attr("name", "mti-wifi"),
 				attr("ssid", strings.TrimSpace(s.WiFi.SSID)),
-				attr("passphrase", s.WiFi.Passphrase),
-				attr("country", strings.TrimSpace(s.WiFi.Country)))
+				attr("security.passphrase", s.WiFi.Passphrase),
+				attr("country", wifiCountry(s.WiFi.Country)))
 			fmt.Fprintf(&b, "/interface wifi set %s configuration=mti-wifi disabled=no\n", rosQuote(ifs))
 		} else {
-			fmt.Fprintf(&b, "/interface wireless set %s disabled=no mode=ap %s country=%s authentication-types=wpa2-psk %s\n",
-				rosQuote(ifs),
-				attr("ssid", strings.TrimSpace(s.WiFi.SSID)),
-				rosQuote(strings.TrimSpace(s.WiFi.Country)),
-				attr("passphrase", s.WiFi.Passphrase))
+			b.WriteString(":if ([:len [/interface wireless security-profiles find where name=\"mti-wifi\"]] = 0) do={ /interface wireless security-profiles add name=mti-wifi }\n")
+			fmt.Fprintf(&b, "/interface wireless security-profiles set [find where name=\"mti-wifi\"] mode=dynamic-keys authentication-types=wpa2-psk unicast-ciphers=aes-ccm group-ciphers=aes-ccm %s\n", attr("wpa2-pre-shared-key", s.WiFi.Passphrase))
+			fmt.Fprintf(&b, "/interface wireless set %s disabled=no mode=ap-bridge %s %s security-profile=mti-wifi\n",
+				rosQuote(ifs), attr("ssid", strings.TrimSpace(s.WiFi.SSID)), attr("country", wifiCountry(s.WiFi.Country)))
 		}
 	}
 
@@ -901,4 +900,14 @@ func yesNo(v bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+// RouterOS expects country names rather than ISO two-letter codes.
+func wifiCountry(value string) string {
+	value = strings.TrimSpace(value)
+	countries := map[string]string{"BY": "belarus", "RU": "russia", "UA": "ukraine", "PL": "poland", "LT": "lithuania", "LV": "latvia", "DE": "germany", "US": "united states", "GB": "united kingdom"}
+	if country, ok := countries[strings.ToUpper(value)]; ok {
+		return country
+	}
+	return strings.ToLower(value)
 }
