@@ -144,3 +144,26 @@ func TestLTEAutomaticAPN(t *testing.T) {
 		}
 	}
 }
+
+func TestWANReusesExistingDHCP(t *testing.T) {
+	s := Settings{WAN: WANSettings{Enabled: true, Failover: true, Links: []WANLink{{Mode: "dhcp", Interface: "ether1", Distance: 1}, {Mode: "dhcp", Interface: "ether2", Distance: 2}}}}
+	d := deviceWith("routeros")
+	d.RouterOS = "7.22.3"
+	res := Generate(d, []Iface{{Name: "ether1", Type: "ether"}, {Name: "ether2", Type: "ether"}}, &s, time.Time{})
+	if !res.OK {
+		t.Fatal(res.Error)
+	}
+	for _, want := range []string{
+		":if ([:len [/ip dhcp-client find where interface=ether1]] = 0)",
+		"else={ /ip dhcp-client set [find where interface=ether1] add-default-route=yes default-route-distance=1 use-peer-dns=no disabled=no }",
+		":local c [/ip dhcp-client find where interface=ether1]",
+		"/ip dhcp-client set [find where interface=ether1] default-route-distance=",
+	} {
+		if !strings.Contains(res.Script, want) {
+			t.Errorf("missing %s", want)
+		}
+	}
+	if strings.Contains(res.Script, "/ip dhcp-client remove [find where interface=") {
+		t.Fatal("must not delete unmanaged client")
+	}
+}

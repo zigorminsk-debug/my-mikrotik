@@ -31,7 +31,7 @@ func buildFailover(b *strings.Builder, s WANSettings) {
 	case "lte":
 		fmt.Fprintf(&code, ":if ([/interface get [find name=%s] running]) do={ :set gw %s };\n", rosQuote(primary.Interface), rosQuote(primary.Interface))
 	case "dhcp":
-		code.WriteString(":local c [/ip dhcp-client find comment=mti-wan-0];\n:if ([:len $c] > 0) do={ :if ([/ip dhcp-client get $c status] = \"bound\") do={\n")
+		code.WriteString(":local c [/ip dhcp-client find where interface=" + rosQuote(primary.Interface) + "];\n:if ([:len $c] > 0) do={ :if ([/ip dhcp-client get $c status] = \"bound\") do={\n")
 		fmt.Fprintf(&code, ":set gw ([/ip dhcp-client get $c gateway] . %s);\n} };\n", rosQuote("%"+primary.Interface))
 	}
 	var distanceRead string
@@ -39,7 +39,7 @@ func buildFailover(b *strings.Builder, s WANSettings) {
 	case "static":
 		distanceRead = "[/ip route get [find comment=mti-wan-0] distance]"
 	case "dhcp":
-		distanceRead = "[/ip dhcp-client get [find comment=mti-wan-0] default-route-distance]"
+		distanceRead = "[/ip dhcp-client get [find where interface=" + rosQuote(primary.Interface) + "] default-route-distance]"
 	case "lte":
 		distanceRead = "[/interface lte apn get [find name=mti-wan-0-apn] default-route-distance]"
 	}
@@ -51,7 +51,7 @@ func buildFailover(b *strings.Builder, s WANSettings) {
 	case "static":
 		code.WriteString("/ip route set [find comment=mti-wan-0] distance=$distance;\n")
 	case "dhcp":
-		code.WriteString("/ip dhcp-client set [find comment=mti-wan-0] default-route-distance=$distance;\n")
+		code.WriteString("/ip dhcp-client set [find where interface=" + rosQuote(primary.Interface) + "] default-route-distance=$distance;\n")
 	case "lte":
 		code.WriteString("/interface lte apn set [find name=mti-wan-0-apn] default-route-distance=$distance;\n")
 	}

@@ -122,7 +122,7 @@ func buildWAN(b *strings.Builder, s WANSettings, device *Info, ifaces []Iface) {
 			}
 			fmt.Fprintf(b, "/interface lte set [find where name=%s] %s disabled=no\n", rosQuote(r.Interface), attr("apn-profiles", name))
 		} else if r.Mode == "dhcp" {
-			fmt.Fprintf(b, "/ip dhcp-client add %s add-default-route=yes default-route-distance=%d use-peer-dns=no disabled=no %s\n", attr("interface", r.Interface), r.Distance, tag)
+			fmt.Fprintf(b, ":if ([:len [/ip dhcp-client find where interface=%s]] = 0) do={ /ip dhcp-client add %s add-default-route=yes default-route-distance=%d use-peer-dns=no disabled=no %s } else={ /ip dhcp-client set [find where interface=%s] add-default-route=yes default-route-distance=%d use-peer-dns=no disabled=no }\n", rosQuote(r.Interface), attr("interface", r.Interface), r.Distance, tag, rosQuote(r.Interface), r.Distance)
 		} else {
 			fmt.Fprintf(b, "/ip address add %s %s %s\n", attr("interface", r.Interface), attr("address", r.Address), tag)
 			check := "none"
