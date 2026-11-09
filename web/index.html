@@ -496,9 +496,14 @@
               <div class="sec-body">
                 <p>Основной и необязательный резервный провайдер: LTE или проводной (DHCP / статический IPv4).
                 Для PPPoE пока используется отдельный раздел. VLAN провайдера нужно создать заранее.</p>
+                <div class="grid">
+                  <label class="field"><span>Контроль интернета: 30 с без ответа → резерв, 60 с ответов → основной (RouterOS 7)</span><input type="checkbox" id="wan-failover"></label>
+                  <label class="field">Контрольный IPv4 (только через основной канал)<input id="wan-probe" value="8.8.8.8" spellcheck="false"></label>
+                </div>
+                <p>Проверка каждые 5 секунд. При включении нужны два провайдера. Проверка основного продолжается на резерве. ICMP роутера к этому узлу закрепляется за основным каналом.</p>
                 <div id="wan-links"></div>
                 <button type="button" class="ghost" id="wan-add">Добавить провайдера</button>
-                <p>DHCP: резервирование при потере lease/link. Ping статического шлюза НЕ проверяет интернет за ним.
+                <p>Без контроля интернета: DHCP реагирует на потерю lease/link; ping шлюза проверяет только шлюз. Контрольный узел должен отвечать на ICMP.
                 Существующие DHCP-клиенты и маршруты могут конфликтовать: проверьте конфигурацию перед применением.
                 Настройки DNS задаются отдельно. Снятие галочки не удаляет ранее применённые настройки.</p>
               </div>
@@ -930,7 +935,7 @@
 
   function collect() {
     return {
-      wan: { enabled: chk("chk-wan"), links: Array.from($("wan-links").children).map(function (row) {
+      wan: { enabled: chk("chk-wan"), failover: chk("wan-failover"), probeHost: val("wan-probe"), links: Array.from($("wan-links").children).map(function (row) {
         var link = {};
         row.querySelectorAll("[data-key]").forEach(function (el) {
           link[el.dataset.key] = el.type === "checkbox" ? el.checked : el.type === "number" ? Number(el.value) : el.value.trim();
@@ -1070,7 +1075,7 @@
     });
   });
 
-  ["lan-iface", "lan-addr", "dhcp-iface", "dhcp-start", "dhcp-end", "dhcp-lease",
+  ["wan-failover", "wan-probe", "lan-iface", "lan-addr", "dhcp-iface", "dhcp-start", "dhcp-end", "dhcp-lease",
    "dns-servers", "dns-remote", "ntp-servers", "ntp-tz",
    "pppoe-iface", "pppoe-name", "pppoe-user", "pppoe-pass", "pppoe-service",
    "pppoe-route", "pppoe-dns", "pppoe-nat",

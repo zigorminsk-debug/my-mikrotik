@@ -557,6 +557,9 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 		errs = append(errs, validateWAN(s.WAN, s.PPPoE)...)
 		errs = append(errs, validateWANLocal(s.WAN, s.LAN)...)
 		errs = append(errs, validateWANInterfaces(s.WAN, ifaces)...)
+		if s.WAN.Failover && (device == nil || !strings.HasPrefix(device.RouterOS, "7.")) {
+			errs = append(errs, "Контроль интернета поддерживается только для RouterOS 7")
+		}
 	}
 	if s.PortForward.Enabled && avail["portForward"] {
 		errs = append(errs, validatePortForward(s.PortForward)...)

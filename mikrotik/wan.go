@@ -9,8 +9,10 @@ import (
 // WANSettings supports up to two independent IPv4 uplinks.
 // DHCP uses lease-provided gateways; static links may check their gateway by ping.
 type WANSettings struct {
-	Enabled bool      `json:"enabled"`
-	Links   []WANLink `json:"links"`
+	Failover  bool      `json:"failover"`
+	ProbeHost string    `json:"probeHost"`
+	Enabled   bool      `json:"enabled"`
+	Links     []WANLink `json:"links"`
 }
 
 type WANLink struct {
@@ -79,6 +81,21 @@ func validateWAN(s WANSettings, pppoe PPPoESettings) []string {
 	if pppoe.Enabled && pppoe.DefaultRoute {
 		errs = append(errs, "WAN: отключите маршрут по умолчанию в отдельном разделе PPPoE, чтобы избежать конфликтующих приоритетов")
 	}
+	if s.Failover {
+		if len(s.Links) != 2 {
+			errs = append(errs, "Резервирование: нужны основной и резервный провайдеры")
+		}
+		probe := net.ParseIP(s.ProbeHost)
+		if s.ProbeHost != "" && (!validIPv4(s.ProbeHost) || probe.IsLoopback() || probe.IsMulticast() || probe.IsUnspecified() || s.ProbeHost == "255.255.255.255") {
+			errs = append(errs, "Резервирование: контрольный узел должен быть IPv4")
+		}
+		if len(s.Links) == 2 && (s.Links[0].Distance != 1 || s.Links[1].Distance != 2) {
+			errs = append(errs, "Резервирование: приоритеты должны быть 1 и 2")
+		}
+		if s.Links[0].CheckGateway {
+			errs = append(errs, "Резервирование: отключите отдельную проверку шлюза, используется контрольный узел")
+		}
+	}
 	return errs
 }
 
@@ -118,6 +135,9 @@ func buildWAN(b *strings.Builder, s WANSettings, device *Info, ifaces []Iface) {
 		if r.NAT {
 			fmt.Fprintf(b, "/ip firewall nat add chain=srcnat %s action=masquerade %s\n", attr("out-interface", r.Interface), tag)
 		}
+	}
+	if device != nil && strings.HasPrefix(device.RouterOS, "7.") {
+		buildFailover(b, s)
 	}
 }
 
