@@ -263,7 +263,7 @@ func LocalURLs(port int) []string {
 }
 
 // ListenAndServe запускает сервер на addr и возвращает фактический адрес
-// (полезно при addr с портом 0). Возвращает управление сразу после запуска.
+// (полезно при addr с портом 0). Работает до остановки сервера или ошибки.
 func ListenAndServe(addr string, h http.Handler, ready func(addr string) error) error {
 	return ListenAndServeUntil(addr, h, ready, nil)
 }
@@ -275,15 +275,19 @@ func ListenAndServeUntil(addr string, h http.Handler, ready func(string) error, 
 	if err != nil {
 		return fmt.Errorf("не удалось запустить сервер: %w", err)
 	}
-	if ready != nil {
-		if err := ready(ln.Addr().String()); err != nil {
-			_ = ln.Close()
-			return err
-		}
-	}
 	srv := &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second}
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(ln) }()
+	// The listener must serve before the GUI navigates to it. Closing the
+	// listener explicitly also covers a callback failure before Serve starts.
+	if ready != nil {
+		if err := ready(ln.Addr().String()); err != nil {
+			_ = srv.Close()
+			_ = ln.Close()
+			<-served
+			return err
+		}
+	}
 	var window <-chan error
 	if done != nil {
 		window = done()

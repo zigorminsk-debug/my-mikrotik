@@ -8,3 +8,5 @@ func openDesktop(url string) (<-chan error, func(), error) {
 }
 
 func showStartupError(err error) {}
+
+func initLogging() func() { return func() {} }

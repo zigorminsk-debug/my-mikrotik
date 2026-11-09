@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"image/png"
 	"io"
 	"net/http"
@@ -227,5 +228,53 @@ func TestListenAndServeUntilWindowCloses(t *testing.T) {
 	if resp, err := client.Get("http://" + a); err == nil {
 		resp.Body.Close()
 		t.Fatal("server still listening")
+	}
+}
+
+func TestServerReadyBeforeWindowLaunch(t *testing.T) {
+	done := make(chan error, 1)
+	finished := make(chan error, 1)
+	gotReady := make(chan error, 1)
+	go func() {
+		finished <- ListenAndServeUntil("127.0.0.1:0", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("ready")) }), func(addr string) error {
+			client := http.Client{Timeout: 2 * time.Second}
+			res, err := client.Get("http://" + addr)
+			if err != nil {
+				gotReady <- err
+				return err
+			}
+			defer res.Body.Close()
+			body, err := io.ReadAll(res.Body)
+			if err == nil && string(body) != "ready" {
+				err = fmt.Errorf("unexpected body %q", body)
+			}
+			gotReady <- err
+			return err
+		}, func() <-chan error { return done })
+	}()
+	if err := <-gotReady; err != nil {
+		t.Fatal(err)
+	}
+	done <- nil
+	select {
+	case err := <-finished:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not shut down")
+	}
+}
+
+func TestServerClosesWhenReadyCallbackFails(t *testing.T) {
+	var addr string
+	err := ListenAndServeUntil("127.0.0.1:0", http.NotFoundHandler(), func(a string) error { addr = a; return fmt.Errorf("startup failed") }, nil)
+	if err == nil || err.Error() != "startup failed" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	client := http.Client{Timeout: time.Second}
+	if resp, err := client.Get("http://" + addr); err == nil {
+		resp.Body.Close()
+		t.Fatal("listener still active")
 	}
 }

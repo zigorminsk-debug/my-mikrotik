@@ -118,6 +118,11 @@ jobs:
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=0.0.0" "/DSourceExe=$PWD\dist\${{ matrix.artifact }}" "/DOutputDir=$PWD\dist" windows/setup.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Проверка установленной программы Windows
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: ./windows/smoke-test.ps1 -Installer "$PWD/dist/mikrotik-inspector-v0.0.0-windows-setup.exe"
+
       - name: Загрузка артефакта
         uses: actions/upload-artifact@v7
         with:

@@ -25,6 +25,8 @@ import (
 var version = "dev"
 
 func main() {
+	closeLog := initLogging()
+	defer closeLog()
 	addr := flag.String("addr", "127.0.0.1:0", "адрес HTTP-сервера GUI (по умолчанию — случайный локальный порт)")
 	noBrowser := flag.Bool("no-browser", false, "не открывать браузер автоматически")
 	showVersion := flag.Bool("version", false, "вывести версию и выйти")
