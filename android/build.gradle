@@ -1,0 +1,5 @@
+// Корневой build-файл Android-приложения MikroTik Inspector.
+// Версии плагинов подобраны совместимо с JDK 17/21 на GitHub-раннерах.
+plugins {
+    id 'com.android.application' version '8.6.1' apply false
+}

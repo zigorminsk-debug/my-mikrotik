@@ -1,0 +1,1202 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MikroTik Inspector</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/png" href="/icon.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<meta name="theme-color" content="#0f172a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<style>
+  :root {
+    --bg: #eef2f7;
+    --card: #ffffff;
+    --ink: #0f172a;
+    --muted: #64748b;
+    --accent: #2563eb;
+    --accent-dark: #1d4ed8;
+    --ok: #16a34a;
+    --err: #dc2626;
+    --warn: #b45309;
+    --border: #e2e8f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: linear-gradient(160deg, #e8eef9 0%, #eef2f7 45%, #f1f5f9 100%);
+    color: var(--ink);
+    min-height: 100vh;
+  }
+  header {
+    background: linear-gradient(90deg, #0f172a 0%, #1e293b 100%);
+    color: #fff;
+    padding: 18px 28px;
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  header h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: .3px; }
+  header .sub { color: #94a3b8; font-size: 13px; }
+  header .ver {
+    margin-left: auto; font-size: 12px; color: #cbd5e1;
+    background: #334155; padding: 3px 10px; border-radius: 999px;
+  }
+  main { max-width: 1320px; margin: 24px auto 48px; padding: 0 16px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, .06);
+    padding: 20px 22px;
+    margin-bottom: 20px;
+  }
+  .card h2 { margin: 0 0 16px; font-size: 15px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); font-weight: 650; }
+  form .grid, .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 14px 16px;
+  }
+  label.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
+  input, select {
+    font: inherit;
+    padding: 9px 11px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #f8fafc;
+    color: var(--ink);
+    outline: none;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37, 99, 235, .15); background: #fff; }
+  input:disabled, select:disabled { background: #f1f5f9; color: #94a3b8; cursor: not-allowed; }
+  .row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+  .checkbox { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink); font-weight: 500; cursor: pointer; user-select: none; }
+  .checkbox input { width: 16px; height: 16px; accent-color: var(--accent); }
+  button {
+    font: inherit;
+    font-weight: 600;
+    border: 0;
+    border-radius: 9px;
+    padding: 10px 22px;
+    cursor: pointer;
+    background: var(--accent);
+    color: #fff;
+    transition: background .15s, transform .05s;
+  }
+  button:hover { background: var(--accent-dark); }
+  button:active { transform: translateY(1px); }
+  button:disabled { background: #94a3b8; cursor: not-allowed; }
+  button.ghost { background: #e2e8f0; color: var(--ink); }
+  button.ghost:hover { background: #cbd5e1; }
+  button.ok { background: var(--ok); }
+  button.ok:hover { background: #15803d; }
+  .hint { font-size: 12.5px; color: var(--muted); margin-top: 12px; line-height: 1.5; }
+  .hint code { background: #f1f5f9; padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+
+  /* --- вкладки --- */
+  .tabs { display: flex; gap: 6px; margin-bottom: 18px; border-bottom: 2px solid var(--border); }
+  .tabs button {
+    background: transparent; color: var(--muted); border-radius: 10px 10px 0 0;
+    padding: 10px 20px; font-weight: 600; border-bottom: 2px solid transparent; margin-bottom: -2px;
+  }
+  .tabs button:hover { background: #e2e8f0; color: var(--ink); }
+  .tabs button.active { color: var(--accent); border-bottom-color: var(--accent); background: #fff; }
+  .tabs button:disabled { color: #cbd5e1; background: transparent; }
+  .tabpane { display: none; }
+  .tabpane.active { display: block; }
+
+  #status { display: none; margin-bottom: 20px; }
+  #status.show { display: block; }
+  .badge {
+    display: inline-block; font-size: 12.5px; font-weight: 650;
+    background: #dbeafe; color: #1e40af; border-radius: 999px; padding: 4px 12px; margin-right: 8px;
+  }
+  .badge.id { background: #dcfce7; color: #166534; }
+  .error-box {
+    background: #fef2f2; border: 1px solid #fecaca; color: #991b1b;
+    border-radius: 10px; padding: 14px 16px; font-size: 14px; line-height: 1.55;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .ok-box {
+    background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534;
+    border-radius: 10px; padding: 14px 16px; font-size: 14px; line-height: 1.55;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .warn-box {
+    background: #fffbeb; border: 1px solid #fde68a; color: var(--warn);
+    border-radius: 10px; padding: 14px 16px; font-size: 14px; line-height: 1.55;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .kv {
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .kv .k { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; font-weight: 650; }
+  .kv .v { font-size: 16px; font-weight: 650; margin-top: 5px; word-break: break-word; }
+  .kv .v.empty { color: #cbd5e1; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); background: #f8fafc; }
+  tr:last-child td { border-bottom: 0; }
+  td.mono, .mono { font-family: Consolas, "SF Mono", Menlo, monospace; }
+  .table-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+  .table-head h2 { margin: 0; }
+  .count { font-size: 13px; color: var(--muted); font-weight: 600; }
+  .empty-row { color: var(--muted); font-style: italic; padding: 14px 12px; }
+  .actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+  #result { display: none; }
+  #result.show { display: block; }
+  .spinner {
+    display: inline-block; width: 14px; height: 14px; margin-right: 8px;
+    border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%;
+    animation: spin .7s linear infinite; vertical-align: -2px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  footer { text-align: center; color: var(--muted); font-size: 12.5px; padding-bottom: 30px; }
+  footer a, .hint a { color: var(--accent); }
+
+  /* --- конструктор --- */
+  .builder { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+  @media (max-width: 1080px) { .builder { grid-template-columns: minmax(0, 1fr); } }
+  .menu-group { margin-bottom: 14px; }
+  .menu-title {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: #94a3b8;
+    font-weight: 700; padding: 4px 2px 6px; border-bottom: 1px dashed var(--border); margin-bottom: 6px;
+  }
+  .sec { border-radius: 10px; margin-bottom: 6px; transition: background .15s; }
+  .sec:hover { background: #f8fafc; }
+  .sec-head {
+    display: flex; align-items: center; gap: 10px; padding: 9px 10px; cursor: pointer;
+    font-size: 14.5px; font-weight: 600; user-select: none; border-radius: 10px;
+  }
+  .sec-head input[type=checkbox] { width: 17px; height: 17px; accent-color: var(--accent); flex: none; }
+  .sec-head input[type=checkbox]:disabled { cursor: not-allowed; }
+  .sec-path { font-size: 11.5px; color: #94a3b8; font-weight: 500; margin-left: auto; white-space: nowrap; }
+  .lock {
+    font-size: 12px; font-weight: 600; color: var(--warn); background: #fef3c7;
+    border: 1px solid #fde68a; border-radius: 8px; padding: 3px 9px; line-height: 1.35;
+  }
+  .lock[hidden] { display: none; }
+  .sec.locked { background: #fffdf5; }
+  .sec.locked .sec-head { cursor: not-allowed; }
+  .sec.locked .sec-head .sec-title { color: #a1a1aa; }
+  .sec.locked .sec-body { display: none !important; }
+  .sec-body { padding: 4px 10px 14px 37px; }
+  .sec:not(.on) .sec-body { display: none; }
+  .sec-body .grid { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+  .sec-note { font-size: 12.5px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
+  .sec-note code { background: #f1f5f9; padding: 1px 5px; border-radius: 5px; }
+  .script-wrap { position: relative; }
+  pre.script {
+    margin: 0; padding: 14px 16px; border-radius: 12px; background: #0f172a; color: #e2e8f0;
+    font-family: Consolas, "SF Mono", Menlo, monospace; font-size: 12.5px; line-height: 1.55;
+    max-height: 520px; overflow: auto; white-space: pre; tab-size: 4;
+  }
+  pre.script:empty::before { content: "предпросмотр появится после выбора разделов"; color: #64748b; }
+  .sticky { position: sticky; top: 16px; }
+  .pill {
+    font-size: 11.5px; font-weight: 700; letter-spacing: .3px; text-transform: uppercase;
+    padding: 3px 9px; border-radius: 999px; background: #e2e8f0; color: #475569;
+  }
+  .pill.good { background: #dcfce7; color: #166534; }
+  .pill.bad { background: #fee2e2; color: #991b1b; }
+  .ip-note { font-size: 11.5px; color: #94a3b8; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MikroTik Inspector</h1>
+  <span class="sub">модель · прошивка · установленные пакеты · конструктор конфигурации</span>
+  <span class="ver" id="appver"></span>
+</header>
+
+<main>
+  <div class="tabs" role="tablist">
+    <button type="button" id="tabbtn-info" class="active" role="tab">Информация</button>
+    <button type="button" id="tabbtn-build" role="tab">Конструктор</button>
+  </div>
+
+  <!-- ==================== ИНФОРМАЦИЯ ==================== -->
+  <div class="tabpane active" id="tab-info">
+    <section class="card">
+      <h2>Подключение к роутеру</h2>
+      <form id="connform" autocomplete="off">
+        <div class="grid">
+          <label class="field">Адрес роутера
+            <input id="host" name="host" placeholder="192.168.88.1" required>
+          </label>
+          <label class="field">Порт (0 — по умолчанию)
+            <input id="port" name="port" type="number" min="0" max="65535" placeholder="0">
+          </label>
+          <label class="field">Логин
+            <input id="user" name="user" placeholder="admin" required>
+          </label>
+          <label class="field">Пароль
+            <input id="password" name="password" type="password" placeholder="••••••••">
+          </label>
+          <label class="field">Протокол
+            <select id="protocol">
+              <option value="auto" selected>Авто (API → REST)</option>
+              <option value="api">RouterOS API</option>
+              <option value="rest">REST API</option>
+            </select>
+          </label>
+        </div>
+        <div class="row">
+          <label class="checkbox"><input type="checkbox" id="tls"> TLS / HTTPS</label>
+          <button type="submit" id="go">Подключиться</button>
+          <button type="button" class="ghost" id="copy" style="display:none">Скопировать отчёт</button>
+        </div>
+        <div class="hint">
+          Порты по умолчанию: RouterOS API — <code>8728</code> (с TLS — <code>8729</code>),
+          REST API — <code>80</code> (с TLS — <code>443</code>). Рекомендуется включить
+          в RouterOS <code>/ip service</code> api/rest и входить под администратором.
+          Данные подключения используются и для применения конфигурации.
+        </div>
+      </form>
+    </section>
+
+    <div id="status" class="error-box"></div>
+
+    <section id="result">
+      <div class="card">
+        <div class="table-head">
+          <h2>Устройство</h2>
+          <span class="count" id="meta"></span>
+        </div>
+        <div class="cards" id="devcards"></div>
+      </div>
+
+      <div class="card">
+        <div class="table-head">
+          <h2>Установленные пакеты</h2>
+          <span class="count" id="pkgcount"></span>
+        </div>
+        <table>
+          <thead>
+            <tr><th style="width:40%">Имя</th><th style="width:35%">Версия</th><th>Статус</th></tr>
+          </thead>
+          <tbody id="pkgs"><tr><td colspan="3" class="empty-row">нет данных</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <!-- ==================== КОНСТРУКТОР ==================== -->
+  <div class="tabpane" id="tab-build">
+    <section class="card" id="build-need-conn">
+      <h2>Конструктор конфигурации</h2>
+      <div class="warn-box">
+        Сначала подключитесь к роутеру на вкладке «Информация» — конструктор строится
+        по данным конкретного устройства: модель, версия RouterOS, установленные пакеты
+        и сетевые интерфейсы.
+      </div>
+    </section>
+
+    <div id="build-body" style="display:none">
+      <div class="builder">
+        <!-- меню как в RouterOS -->
+        <section class="card">
+          <div class="table-head">
+            <h2>Меню RouterOS</h2>
+            <span class="count" id="devline"></span>
+          </div>
+
+          <div class="menu-group">
+            <div class="menu-title">IP</div>
+
+            <div class="sec" data-feat="lan">
+              <label class="sec-head" for="chk-lan">
+                <input type="checkbox" id="chk-lan">
+                <span class="sec-title">Addresses — адрес и подсеть</span>
+                <span class="sec-path mono">/ip address</span>
+                <span class="lock" hidden></span>
+              </label>
+              <div class="sec-body">
+                <div class="grid">
+                  <label class="field">Интерфейс LAN
+                    <select id="lan-iface"></select>
+                  </label>
+                  <label class="field">Адрес роутера
+                    <input id="lan-addr" class="cidr" value="192.168.88.1/24" spellcheck="false" placeholder="192.168.88.1/24">
+                  </label>
+                </div>
+                <div class="sec-note" id="lan-note"></div>
+              </div>
+            </div>
+
+            <div class="sec" data-feat="dhcp">
+              <label class="sec-head" for="chk-dhcp">
+                <input type="checkbox" id="chk-dhcp">
+                <span class="sec-title">DHCP Server — раздача адресов</span>
+                <span class="sec-path mono">/ip dhcp-server</span>
+                <span class="lock" hidden></span>
+              </label>
+              <div class="sec-body">
+                <div class="grid">
+                  <label class="field">Интерфейс DHCP
+                    <select id="dhcp-iface"></select>
+                  </label>
+                  <label class="field">Время аренды
+                    <select id="dhcp-lease">
+                      <option value="10m">10 минут</option>
+                      <option value="30m">30 минут</option>
+                      <option value="1h">1 час</option>
+                      <option value="3h">3 часа</option>
+                      <option value="12h">12 часов</option>
+                      <option value="1d" selected>1 день</option>
+                      <option value="3d">3 дня</option>
+                      <option value="7d">7 дней</option>
+                    </select>
+                  </label>
+                  <label class="field">Пул: с
+                    <input id="dhcp-start" class="ip" spellcheck="false" placeholder="авто">
+                  </label>
+                  <label class="field">Пул: по
+                    <input id="dhcp-end" class="ip" spellcheck="false" placeholder="авто">
+                  </label>
+                </div>
+                <div class="sec-note" id="dhcp-note">Оставьте оба поля пустыми — пул будет подобран автоматически.</div>
+              </div>
+            </div>
+
+            <div class="sec" data-feat="dns">
+              <label class="sec-head" for="chk-dns">
+                <input type="checkbox" id="chk-dns">
+                <span class="sec-title">DNS — серверы имён</span>
+                <span class="sec-path mono">/ip dns</span>
+                <span class="lock" hidden></span>
+              </label>
+              <div class="sec-body">
+                <div class="grid">
+                  <label class="field">DNS-серверы (через запятую)
+                    <input id="dns-servers" class="iplist" value="8.8.8.8, 8.8.4.4" spellcheck="false" placeholder="8.8.8.8, 8.8.4.4">
+                  </label>
+                  <label class="field">Доступ из локальной сети
+                    <span class="checkbox"><input type="checkbox" id="dns-remote" checked> разрешить запросы клиентов</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="menu-group">
+            <div class="menu-title">System</div>
+
+            <div class="sec" data-feat="ntp">
+              <label class="sec-head" for="chk-ntp">
+                <input type="checkbox" id="chk-ntp">
+                <span class="sec-title">NTP Client — точное время</span>
+                <span class="sec-path mono">/system ntp client</span>
+                <span class="lock" hidden></span>
+              </label>
+              <div class="sec-body">
+                <div class="grid">
+                  <label class="field">Серверы времени
+                    <input id="ntp-servers" value="pool.ntp.org" spellcheck="false" placeholder="pool.ntp.org">
+                  </label>
+                  <label class="field">Часовой пояс
+                    <input id="ntp-tz" value="Europe/Minsk" spellcheck="false" placeholder="Europe/Minsk">
+                  </label>
+                </div>
+                <div class="sec-note">
+                  NTP-клиент входит в системный пакет, но на некоторых сборках RouterOS 7
+                  требуется пакет <code>ntp</code> для режима сервера.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="menu-group">
+            <div class="menu-title">PPP</div>
+
+            <div class="sec" data-feat="pppoe">
+              <label class="sec-head" for="chk-pppoe">
+                <input type="checkbox" id="chk-pppoe">
+                <span class="sec-title">PPPoE Client — подключение к интернету</span>
+                <span class="sec-path mono">/interface pppoe-client</span>
+                <span class="lock" hidden></span>
+              </label>
+              <div class="sec-body">
+                <div class="grid">
+                  <label class="field">WAN-интерфейс
+                    <select id="pppoe-iface"></select>
+                  </label>
+                  <label class="field">Имя подключения
+                    <input id="pppoe-name" value="pppoe-out1" spellcheck="false" placeholder="pppoe-out1">
+                  </label>
+                  <label class="field">Логин провайдера
+                    <input id="pppoe-user" spellcheck="false" autocomplete="off" placeholder="login@provider.by">
+                  </label>
+                  <label class="field">Пароль провайдера
+                    <input id="pppoe-pass" type="password" autocomplete="new-password" placeholder="••••••••">
+                  </label>
+                  <label class="field">Имя сервиса (необязательно)
+                    <input id="pppoe-service" spellcheck="false" placeholder="">
+                  </label>
+                </div>
+                <div class="row">
+                  <label class="checkbox"><input type="checkbox" id="pppoe-route" checked> маршрут по умолчанию</label>
+                  <label class="checkbox"><input type="checkbox" id="pppoe-dns" checked> DNS провайдера</label>
+                  <label class="checkbox"><input type="checkbox" id="pppoe-nat" checked> NAT (masquerade)</label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="menu-group">
+            <div class="menu-title">Interface</div>
+
+            <div class="sec" data-feat="wifi">
+              <label class="sec-head" for="chk-wifi">
+                <input type="checkbox" id="chk-wifi">
+                <span class="sec-title">Wireless — Wi-Fi сеть</span>
+                <span class="sec-path mono" id="wifi-path">/interface wireless</span>
+                <span class="lock" hidden></span>
+              </label>
+              <div class="sec-body">
+                <div class="grid">
+                  <label class="field">Беспроводной интерфейс
+                    <select id="wifi-iface"></select>
+                  </label>
+                  <label class="field">Имя сети (SSID)
+                    <input id="wifi-ssid" maxlength="32" spellcheck="false" placeholder="My Home Wi-Fi">
+                  </label>
+                  <label class="field">Пароль (8–63 символа)
+                    <input id="wifi-pass" type="password" maxlength="63" autocomplete="new-password" placeholder="••••••••">
+                  </label>
+                  <label class="field">Страна (код)
+                    <input id="wifi-country" value="BY" maxlength="2" spellcheck="false" placeholder="BY">
+                  </label>
+                </div>
+                <div class="sec-note" id="wifi-note"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button type="button" class="ghost" id="refresh">Обновить данные устройства</button>
+          </div>
+        </section>
+
+        <!-- предпросмотр и действия -->
+        <section class="card sticky">
+          <div class="table-head">
+            <h2>Скрипт для New Terminal</h2>
+            <span class="pill" id="script-state">ожидание</span>
+          </div>
+          <div id="build-error" class="error-box" style="display:none"></div>
+          <div id="build-skip" class="warn-box" style="margin-bottom:12px;display:none"></div>
+          <div id="build-ok" class="ok-box" style="margin-bottom:12px;display:none"></div>
+          <div class="script-wrap">
+            <pre class="script" id="script"></pre>
+          </div>
+          <div class="actions">
+            <button type="button" id="btn-copy" disabled>Скопировать для New Terminal</button>
+            <button type="button" class="ok" id="btn-apply" disabled>Применить на роутере</button>
+            <button type="button" class="ghost" id="btn-download" disabled>Скачать .rsc</button>
+          </div>
+          <div class="hint">
+            Кнопка «Применить» создаёт на роутере служебный скрипт <code>mti-apply</code>
+            и запускает его — результат тот же, что при вставке кода в New Terminal.
+            Объекты, созданные конструктором, помечены <code>mti-*</code>; повторное
+            применение заменяет их. Перед изменениями полезно сохранить резервную копию:
+            <code>/system backup save name=before-mti</code>.
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Данные читаются напрямую с роутера по RouterOS API / REST API. Пароль не сохраняется и не покидает локальный компьютер.
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var lastInfo = null;      // данные об устройстве
+  var lastIfaces = [];      // интерфейсы
+  var features = {};        // доступность разделов
+  var currentScript = "";   // актуальный скрипт
+  var previewTimer = null;
+  var previewSeq = 0;
+
+  var LABELS = [
+    ["identity", "Идентификатор"],
+    ["model", "Модель"],
+    ["board", "Плата"],
+    ["routeros", "Версия RouterOS (прошивка)"],
+    ["currentFirmware", "Текущая прошивка"],
+    ["factoryFirmware", "Заводская прошивка"],
+    ["upgradeFirmware", "Доступна прошивка"],
+    ["architecture", "Архитектура"],
+    ["cpu", "Процессор"],
+    ["uptime", "Аптайм"]
+  ];
+
+  var FEATURES = ["lan", "dhcp", "dns", "ntp", "pppoe", "wifi"];
+  var DEFAULT_ON = ["lan", "dhcp"];
+  var DEFAULTS = { "dns-remote": true, "pppoe-route": true, "pppoe-dns": true, "pppoe-nat": true };
+
+  // ------------------------------------------------------------------
+  // вкладки и сохранённые настройки подключения
+  // ------------------------------------------------------------------
+  function showTab(name) {
+    var info = name === "info";
+    $("tab-info").classList.toggle("active", info);
+    $("tab-build").classList.toggle("active", !info);
+    $("tabbtn-info").classList.toggle("active", info);
+    $("tabbtn-build").classList.toggle("active", !info);
+  }
+  $("tabbtn-info").addEventListener("click", function () { showTab("info"); });
+  $("tabbtn-build").addEventListener("click", function () { showTab("build"); });
+
+  function savePrefs() {
+    try {
+      localStorage.setItem("mti-prefs", JSON.stringify({
+        host: $("host").value.trim(),
+        port: $("port").value.trim(),
+        user: $("user").value.trim(),
+        protocol: $("protocol").value,
+        tls: $("tls").checked
+      }));
+    } catch (e) {}
+  }
+
+  function loadPrefs() {
+    try {
+      var p = JSON.parse(localStorage.getItem("mti-prefs") || "{}");
+      if (p.host) $("host").value = p.host;
+      if (p.port) $("port").value = p.port;
+      if (p.user) $("user").value = p.user;
+      if (p.protocol) $("protocol").value = p.protocol;
+      $("tls").checked = !!p.tls;
+    } catch (e) {}
+  }
+
+  function connPayload() {
+    return {
+      host: $("host").value.trim(),
+      port: parseInt($("port").value, 10) || 0,
+      user: $("user").value.trim(),
+      password: $("password").value,
+      tls: $("tls").checked,
+      protocol: $("protocol").value
+    };
+  }
+
+  function showError(msg) {
+    var box = $("status");
+    box.textContent = msg;
+    box.classList.add("show");
+    $("result").classList.remove("show");
+    $("copy").style.display = "none";
+  }
+
+  function hideStatus() { $("status").classList.remove("show"); }
+
+  function kvCard(key, value) {
+    var d = document.createElement("div");
+    d.className = "kv";
+    var k = document.createElement("div");
+    k.className = "k";
+    k.textContent = key;
+    var v = document.createElement("div");
+    v.className = "v" + (value ? "" : " empty");
+    v.textContent = value || "—";
+    d.appendChild(k);
+    d.appendChild(v);
+    return d;
+  }
+
+  function protoLabel(p) {
+    if (p === "api") return "RouterOS API";
+    if (p === "rest") return "REST API";
+    return p || "—";
+  }
+
+  // ------------------------------------------------------------------
+  // автоматическое приведение IP-адресов к формату
+  // ------------------------------------------------------------------
+  function fmtOctets(str) {
+    var parts = String(str).split(".");
+    if (parts.length > 4) parts = parts.slice(0, 4);
+    parts = parts.map(function (p) {
+      var digits = p.replace(/[^0-9]/g, "");
+      if (digits === "") return "";
+      var n = parseInt(digits, 10);
+      if (isNaN(n)) return "";
+      if (n > 255) n = 255;
+      return String(n);
+    });
+    return parts.join(".");
+  }
+
+  function fmtMask(str) {
+    var digits = String(str).replace(/[^0-9]/g, "");
+    if (digits === "") return "";
+    var n = parseInt(digits, 10);
+    if (isNaN(n)) return "";
+    if (n > 32) n = 32;
+    return String(n);
+  }
+
+  // "192.168.001.010/024" → "192.168.1.10/24"
+  function fmtAddr(str) {
+    var s = String(str).replace(/\s+/g, "");
+    var slash = s.indexOf("/");
+    if (slash < 0) return fmtOctets(s);
+    var ip = fmtOctets(s.slice(0, slash));
+    var mask = fmtMask(s.slice(slash + 1));
+    return mask === "" ? ip : ip + "/" + mask;
+  }
+
+  function fmtAddrList(str) {
+    return String(str).split(",").map(function (x) {
+      return fmtAddr(x.trim());
+    }).filter(function (x) { return x !== ""; }).join(", ");
+  }
+
+  function normalizeField(el) {
+    if (!el.value) return;
+    if (el.classList.contains("iplist")) el.value = fmtAddrList(el.value);
+    else if (el.classList.contains("ip") || el.classList.contains("cidr")) el.value = fmtAddr(el.value);
+    if (el.classList.contains("ip") || el.classList.contains("iplist")) {
+      el.value = el.value.replace(/, +/g, ",");
+    }
+  }
+
+  document.addEventListener("input", function (ev) {
+    var el = ev.target;
+    if (!el.classList || !(el.classList.contains("ip") || el.classList.contains("cidr") || el.classList.contains("iplist"))) return;
+    var cleaned = el.value.replace(/[^0-9.,/ ]/g, "");
+    if (cleaned !== el.value) el.value = cleaned;
+  }, true);
+
+  document.addEventListener("blur", function (ev) {
+    var el = ev.target;
+    if (!el.classList || !(el.classList.contains("ip") || el.classList.contains("cidr") || el.classList.contains("iplist"))) return;
+    normalizeField(el);
+    schedulePreview();
+  }, true);
+
+  // ------------------------------------------------------------------
+  // интерфейсы и доступность разделов
+  // ------------------------------------------------------------------
+  function ifaceTypeLabel(i) {
+    return i.type ? " (" + i.type + ")" : "";
+  }
+
+  function fillSelect(sel, items, preferred) {
+    var prev = sel.value;
+    sel.textContent = "";
+    var empty = document.createElement("option");
+    empty.value = "";
+    empty.textContent = "— выберите —";
+    sel.appendChild(empty);
+    items.forEach(function (i) {
+      var o = document.createElement("option");
+      o.value = i.name;
+      o.textContent = i.name + ifaceTypeLabel(i) + (i.disabled ? " · выключен" : "");
+      sel.appendChild(o);
+    });
+    var pick = prev;
+    if (!pick && preferred) pick = preferred(items);
+    if (pick) {
+      var found = false;
+      for (var k = 0; k < sel.options.length; k++) {
+        if (sel.options[k].value === pick) { found = true; break; }
+      }
+      sel.value = found ? pick : "";
+    }
+    if (!sel.value && items.length === 1) sel.value = items[0].name;
+    return sel.value;
+  }
+
+  function isWifi(i) {
+    var t = (i.type || "").toLowerCase();
+    if (t === "wireless" || t === "wifi" || t === "wlan") return true;
+    var n = (i.name || "").toLowerCase();
+    return n.indexOf("wlan") === 0 || n.indexOf("wifi") === 0;
+  }
+
+  function preferEther(items) {
+    var list = items.filter(function (i) { return !isWifi(i) && (i.type || "") !== "bridge"; });
+    if (!list.length) list = items;
+    for (var i = 0; i < list.length; i++) if (list[i].name === "ether1") return "ether1";
+    return list[0] ? list[0].name : "";
+  }
+
+  function preferLan(items) {
+    var list = items.filter(function (i) { return !isWifi(i) && (i.type || "") !== "bridge"; });
+    if (!list.length) list = items;
+    for (var i = 0; i < list.length; i++) if (list[i].name === "ether2") return "ether2";
+    if (list.length > 1) return list[1].name;
+    return list[0] ? list[0].name : "";
+  }
+
+  function preferWifi(items) {
+    var list = items.filter(isWifi);
+    return list[0] ? list[0].name : "";
+  }
+
+  function applyInterfaces(list) {
+    lastIfaces = list || [];
+    var ethernet = lastIfaces;
+    var wifi = lastIfaces.filter(isWifi);
+
+    fillSelect($("pppoe-iface"), ethernet, preferEther);
+    fillSelect($("lan-iface"), ethernet, preferLan);
+    fillSelect($("dhcp-iface"), ethernet, preferLan);
+    fillSelect($("wifi-iface"), wifi.length ? wifi : lastIfaces, preferWifi);
+    if ($("dhcp-iface").value && $("lan-iface").value) {
+      // DHCP по умолчанию работает на том же интерфейсе, что и LAN.
+      if (!$("dhcp-iface").dataset.touched) $("dhcp-iface").value = $("lan-iface").value;
+    }
+    $("devline").textContent = lastIfaces.length
+      ? "интерфейсов: " + lastIfaces.length
+      : "интерфейсы не прочитаны";
+  }
+
+  function applyFeatures(list) {
+    features = {};
+    (list || []).forEach(function (f) { features[f.id] = f; });
+
+    FEATURES.forEach(function (id) {
+      var sec = document.querySelector('.sec[data-feat="' + id + '"]');
+      if (!sec) return;
+      var chk = sec.querySelector(".sec-head input[type=checkbox]");
+      var lock = sec.querySelector(".lock");
+      var f = features[id];
+      var available = f ? !!f.available : true;
+      sec.classList.toggle("locked", !available);
+      chk.disabled = !available;
+      if (!available) {
+        chk.checked = false;
+        sec.classList.remove("on");
+        lock.hidden = false;
+        lock.textContent = f && f.reason ? f.reason : "необходимый пакет отсутствует";
+      } else {
+        lock.hidden = true;
+        lock.textContent = "";
+      }
+      if (id === "wifi" && f) {
+        $("wifi-path").textContent = f.mode === "wave2" ? "/interface wifi" : "/interface wireless";
+        $("wifi-note").textContent = f.mode === "wave2"
+          ? "RouterOS 7: будет создан профиль mti-wifi в /interface wifi и применён к интерфейсу."
+          : "Legacy Wi-Fi: профиль mti-wifi не нужен, настройки применяются напрямую к интерфейсу.";
+      }
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // сбор настроек
+  // ------------------------------------------------------------------
+  function chk(id) { return $(id).checked; }
+  function val(id) { return $(id).value.trim(); }
+
+  function collect() {
+    return {
+      lan: { enabled: chk("chk-lan"), iface: val("lan-iface"), address: val("lan-addr") },
+      dhcp: {
+        enabled: chk("chk-dhcp"), iface: val("dhcp-iface"),
+        poolStart: val("dhcp-start"), poolEnd: val("dhcp-end"), leaseTime: val("dhcp-lease")
+      },
+      dns: { enabled: chk("chk-dns"), servers: val("dns-servers"), allowRemote: chk("dns-remote") },
+      ntp: { enabled: chk("chk-ntp"), servers: val("ntp-servers"), timezone: val("ntp-tz") },
+      pppoe: {
+        enabled: chk("chk-pppoe"), iface: val("pppoe-iface"), name: val("pppoe-name"),
+        user: val("pppoe-user"), password: $("pppoe-pass").value, serviceName: val("pppoe-service"),
+        defaultRoute: chk("pppoe-route"), usePeerDNS: chk("pppoe-dns"), nat: chk("pppoe-nat")
+      },
+      wifi: {
+        enabled: chk("chk-wifi"), iface: val("wifi-iface"), ssid: val("wifi-ssid"),
+        passphrase: $("wifi-pass").value, country: val("wifi-country")
+      }
+    };
+  }
+
+  function setScriptState(text, cls) {
+    var pill = $("script-state");
+    pill.textContent = text;
+    pill.className = "pill" + (cls ? " " + cls : "");
+  }
+
+  function setActions(enabled) {
+    ["btn-copy", "btn-apply", "btn-download"].forEach(function (id) { $(id).disabled = !enabled; });
+  }
+
+  // ------------------------------------------------------------------
+  // предпросмотр скрипта
+  // ------------------------------------------------------------------
+  function schedulePreview() {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(preview, 220);
+  }
+
+  function preview() {
+    if (!lastInfo) return;
+    var seq = ++previewSeq;
+    var payload = { device: lastInfo, interfaces: lastIfaces, settings: collect() };
+
+    fetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (seq !== previewSeq) return; // устаревший ответ
+        applyFeatures(res.features);
+
+        var err = $("build-error");
+        var skip = $("build-skip");
+        if (!res.ok) {
+          err.style.display = "block";
+          err.textContent = "Проверьте настройки:\n· " + (res.error || "неизвестная ошибка").split("; ").join("\n· ");
+          $("script").textContent = "";
+          currentScript = "";
+          setScriptState("ошибки", "bad");
+          setActions(false);
+        } else {
+          err.style.display = "none";
+          err.textContent = "";
+          currentScript = res.script || "";
+          $("script").textContent = currentScript;
+          setScriptState("готов к применению", "good");
+          setActions(currentScript.indexOf("# Настройки не выбраны") < 0);
+          if (currentScript.indexOf("# Настройки не выбраны") >= 0) setScriptState("нет включённых разделов");
+        }
+
+        var notes = [];
+        (res.skipped || []).forEach(function (s) {
+          notes.push("Раздел «" + s.title + "» пропущен: " + s.reason);
+        });
+        if (notes.length) {
+          skip.style.display = "block";
+          skip.textContent = notes.join("\n");
+        } else {
+          skip.style.display = "none";
+        }
+
+        var d = res.derived || {};
+        if (d.network) {
+          $("lan-note").textContent = "Сеть " + d.network + " · шлюз " + d.gateway;
+        } else {
+          $("lan-note").textContent = "";
+        }
+        if (d.pool) {
+          $("dhcp-note").textContent = "Автопул: " + d.pool +
+            (val("dhcp-start") || val("dhcp-end") ? " (используется только если поля пула пусты)" : "");
+        } else {
+          $("dhcp-note").textContent = "Пустой пул — заполните поля вручную или укажите подсеть в разделе Addresses.";
+        }
+      })
+      .catch(function (e) {
+        if (seq !== previewSeq) return;
+        $("build-error").style.display = "block";
+        $("build-error").textContent = "Не удалось построить конфигурацию: " + (e.message || e);
+        setScriptState("ошибка", "bad");
+        setActions(false);
+      });
+  }
+
+  // ------------------------------------------------------------------
+  // обработчики конструктора
+  // ------------------------------------------------------------------
+  FEATURES.forEach(function (id) {
+    var sec = document.querySelector('.sec[data-feat="' + id + '"]');
+    var head = sec.querySelector(".sec-head");
+    var input = sec.querySelector('input[type=checkbox]');
+    input.addEventListener("change", function () {
+      sec.classList.toggle("on", input.checked);
+      schedulePreview();
+    });
+    head.addEventListener("click", function (ev) {
+      if (sec.classList.contains("locked")) { ev.preventDefault(); return; }
+      if (ev.target === input) return;
+      ev.preventDefault();
+      if (input.disabled) return;
+      input.checked = !input.checked;
+      sec.classList.toggle("on", input.checked);
+      schedulePreview();
+    });
+  });
+
+  ["lan-iface", "lan-addr", "dhcp-iface", "dhcp-start", "dhcp-end", "dhcp-lease",
+   "dns-servers", "dns-remote", "ntp-servers", "ntp-tz",
+   "pppoe-iface", "pppoe-name", "pppoe-user", "pppoe-pass", "pppoe-service",
+   "pppoe-route", "pppoe-dns", "pppoe-nat",
+   "wifi-iface", "wifi-ssid", "wifi-pass", "wifi-country"].forEach(function (id) {
+    var el = $(id);
+    if (!el) return;
+    el.addEventListener("input", schedulePreview);
+    el.addEventListener("change", schedulePreview);
+  });
+
+  $("dhcp-iface").addEventListener("change", function () { this.dataset.touched = "1"; });
+
+  $("refresh").addEventListener("click", function () {
+    if (!lastInfo) return;
+    var btn = this;
+    btn.disabled = true;
+    btn.textContent = "Обновляем…";
+    loadInterfaces().finally(function () {
+      btn.disabled = false;
+      btn.textContent = "Обновить данные устройства";
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // подключение и загрузка данных
+  // ------------------------------------------------------------------
+  function loadInterfaces() {
+    var payload = connPayload();
+    payload.device = lastInfo;
+    return fetch("/api/interfaces", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.error || "не удалось прочитать интерфейсы");
+        applyInterfaces(res.interfaces || []);
+        applyFeatures(res.features);
+        if (res.features) preview();
+      })
+      .catch(function (e) {
+        $("devline").textContent = "интерфейсы не прочитаны: " + (e.message || e);
+      });
+  }
+
+  function initBuilder() {
+    $("build-need-conn").style.display = "none";
+    $("build-body").style.display = "";
+    var info = lastInfo || {};
+    $("devline").textContent = (info.model || "устройство") + " · RouterOS " + (info.routeros || "—");
+    $("wifi-country").value = "BY";
+    // начальное состояние: включены LAN и DHCP, если они доступны
+    DEFAULT_ON.forEach(function (id) {
+      var sec = document.querySelector('.sec[data-feat="' + id + '"]');
+      var chkbox = sec.querySelector("input[type=checkbox]");
+      if (!chkbox.disabled) {
+        chkbox.checked = true;
+        sec.classList.add("on");
+      }
+    });
+    loadInterfaces();
+  }
+
+  $("connform").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var btn = $("go");
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Читаем данные…';
+    savePrefs();
+
+    fetch("/api/info", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(connPayload())
+    })
+      .then(function (r) { return r.json().catch(function () { throw new Error("сервер вернул некорректный ответ (HTTP " + r.status + ")"); }); })
+      .then(function (data) {
+        if (!data.ok) throw new Error(data.error || "неизвестная ошибка");
+        if (data.version) $("appver").textContent = "v" + data.version;
+        render(data.info);
+        initBuilder();
+        showTab("build");
+      })
+      .catch(function (e) { showError(e.message || String(e)); })
+      .finally(function () {
+        btn.disabled = false;
+        btn.textContent = "Подключиться";
+      });
+  });
+
+  function render(info) {
+    lastInfo = info;
+    hideStatus();
+
+    $("meta").textContent = "протокол: " + protoLabel(info.protocol);
+    var wrap = $("devcards");
+    wrap.textContent = "";
+    LABELS.forEach(function (pair) {
+      wrap.appendChild(kvCard(pair[1], info[pair[0]]));
+    });
+
+    var pkgs = info.packages || [];
+    $("pkgcount").textContent = pkgs.length + " шт.";
+    var tb = $("pkgs");
+    tb.textContent = "";
+    if (pkgs.length === 0) {
+      var tr0 = document.createElement("tr");
+      var td0 = document.createElement("td");
+      td0.colSpan = 3;
+      td0.className = "empty-row";
+      td0.textContent = "пакеты не найдены";
+      tr0.appendChild(td0);
+      tb.appendChild(tr0);
+    } else {
+      pkgs.forEach(function (p) {
+        var tr = document.createElement("tr");
+        [p.name, p.version, p.status || "installed"].forEach(function (value, i) {
+          var td = document.createElement("td");
+          if (i < 2) td.className = "mono";
+          td.textContent = value;
+          tr.appendChild(td);
+        });
+        tb.appendChild(tr);
+      });
+    }
+
+    $("result").classList.add("show");
+    $("copy").style.display = "";
+  }
+
+  function report(info) {
+    var lines = [];
+    lines.push("MikroTik Inspector — отчёт о роутере");
+    lines.push("Протокол: " + protoLabel(info.protocol));
+    lines.push("Идентификатор: " + (info.identity || "—"));
+    lines.push("Модель: " + (info.model || "—"));
+    if (info.board) lines.push("Плата: " + info.board);
+    lines.push("Версия RouterOS: " + (info.routeros || "—"));
+    if (info.currentFirmware) lines.push("Текущая прошивка: " + info.currentFirmware);
+    if (info.factoryFirmware) lines.push("Заводская прошивка: " + info.factoryFirmware);
+    if (info.architecture) lines.push("Архитектура: " + info.architecture);
+    if (info.cpu) lines.push("Процессор: " + info.cpu);
+    if (info.uptime) lines.push("Аптайм: " + info.uptime);
+    lines.push("");
+    lines.push("Установленные пакеты (" + (info.packages || []).length + "):");
+    (info.packages || []).forEach(function (p) {
+      lines.push("  - " + p.name + " " + p.version + (p.status ? " [" + p.status + "]" : ""));
+    });
+    return lines.join("\n");
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve, reject) {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); resolve(); }
+      catch (e) { reject(e); }
+      finally { document.body.removeChild(ta); }
+    });
+  }
+
+  $("copy").addEventListener("click", function () {
+    if (!lastInfo) return;
+    var btn = this;
+    copyText(report(lastInfo)).then(function () {
+      var old = btn.textContent;
+      btn.textContent = "Скопировано ✓";
+      setTimeout(function () { btn.textContent = old; }, 1500);
+    }).catch(function () {
+      showError("не удалось скопировать в буфер обмена");
+    });
+  });
+
+  function flash(btn, text) {
+    var old = btn.textContent;
+    btn.textContent = text;
+    setTimeout(function () { btn.textContent = old; }, 1600);
+  }
+
+  $("btn-copy").addEventListener("click", function () {
+    if (!currentScript) return;
+    var btn = this;
+    copyText(currentScript).then(function () {
+      flash(btn, "Скопировано ✓");
+    }).catch(function () {
+      $("build-error").style.display = "block";
+      $("build-error").textContent = "Не удалось скопировать в буфер обмена — выделите текст скрипта вручную.";
+    });
+  });
+
+  $("btn-download").addEventListener("click", function () {
+    if (!currentScript) return;
+    var name = "mikrotik-" + ((lastInfo && lastInfo.model) || "config").replace(/[^A-Za-z0-9_-]+/g, "-") + ".rsc";
+    var blob = new Blob([currentScript], { type: "text/plain;charset=utf-8" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () {
+      URL.revokeObjectURL(a.href);
+      document.body.removeChild(a);
+    }, 0);
+    flash(this, "Файл сохранён ✓");
+  });
+
+  $("btn-apply").addEventListener("click", function () {
+    if (!currentScript) return;
+    var host = $("host").value.trim();
+    var ok = window.confirm(
+      "Применить настройки на роутере " + host + "?\n\n" +
+      "Будет создан и выполнен скрипт mti-apply. Объекты mti-* будут заменены.\n" +
+      "Перед применением можно сохранить резервную копию: /system backup save name=before-mti"
+    );
+    if (!ok) return;
+
+    var btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Применяем…';
+    var okBox = $("build-ok");
+    var errBox = $("build-error");
+    errBox.style.display = "none";
+    okBox.style.display = "none";
+
+    fetch("/api/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conn: connPayload(), script: currentScript })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.error || "не удалось применить настройки");
+        okBox.style.display = "block";
+        okBox.textContent = "Настройки применены на " + host +
+          " (протокол: " + protoLabel(res.protocol) + ").\nСкрипт " + res.script + " выполнен на роутере.";
+        setScriptState("применено", "good");
+      })
+      .catch(function (e) {
+        errBox.style.display = "block";
+        errBox.textContent = "Применение не удалось: " + (e.message || e) +
+          "\nМожно скопировать скрипт и вставить его в New Terminal вручную.";
+        setScriptState("ошибка применения", "bad");
+      })
+      .finally(function () {
+        btn.disabled = !currentScript;
+        btn.textContent = "Применить на роутере";
+      });
+  });
+
+  loadPrefs();
+  showTab("info");
+})();
+</script>
+</body>
+</html>

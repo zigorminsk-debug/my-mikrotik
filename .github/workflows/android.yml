@@ -1,0 +1,200 @@
+name: Android APK
+
+# Сборка Android-приложения (APK).
+#
+# Почему сборка идёт на GitHub, а не локально: APK требует Android SDK, NDK,
+# JDK и gomobile. На раннере ubuntu-latest SDK и JDK 17 предустановлены, поэтому
+# сборка воспроизводима, а в репозитории не нужны ни инструменты, ни бинарники.
+#
+# Этапы:
+#   1. gomobile bind — Go-ядро (HTTP-сервер + RouterOS API/REST) в bridge.aar;
+#   2. Gradle — Java-обвязка с WebView + AAR → app-debug.apk;
+#   3. для тега: подпись release-ключами из секретов (если заданы);
+#   4. публикация APK в артефактах запуска и в GitHub Release.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+    # APK собирается сразу после изменений в Android-части, ядре и интерфейсе.
+    branches: ["**"]
+    paths:
+      - "android/**"
+      - "internal/**"
+      - "web/**"
+      - "mikrotik/**"
+      - "go.mod"
+      - ".github/workflows/android.yml"
+
+permissions:
+  contents: write # нужно для загрузки APK в GitHub Release
+
+jobs:
+  apk:
+    name: Сборка APK
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: "26.1.10909125"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Настройка Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Настройка JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Установка Android SDK и NDK
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "Android SDK: $SDK"
+          SDKMGR=""
+          for candidate in "$SDK/cmdline-tools/latest/bin/sdkmanager" "$SDK/cmdline-tools/bin/sdkmanager" "$SDK/tools/bin/sdkmanager"; do
+            if [ -x "$candidate" ]; then SDKMGR="$candidate"; break; fi
+          done
+          if [ -z "$SDKMGR" ]; then
+            echo "::error::sdkmanager не найден в $SDK"
+            exit 1
+          fi
+          # NDK нужен gomobile: он собирает libgojni.so для каждой ABI.
+          "$SDKMGR" --install "platforms;android-34" "build-tools;34.0.0" "ndk;${NDK_VERSION}" > /tmp/sdkmanager.log 2>&1 || {
+            tail -40 /tmp/sdkmanager.log
+            exit 1
+          }
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$SDK/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Установка gomobile и gobind
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Версия приложения
+        id: ver
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            V="${GITHUB_REF_NAME#v}"
+          else
+            V="0.3.0-dev.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "version=${V}" >> "$GITHUB_OUTPUT"
+          echo "code=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "Версия ${V}, versionCode ${GITHUB_RUN_NUMBER}"
+
+      - name: Зависимости для gomobile
+        working-directory: android
+        # gomobile bind требует golang.org/x/mobile в графе зависимостей модуля.
+        # Файл android/tools.go (тег tools) удерживает зависимость при go mod tidy,
+        # иначе tidy удаляет её как неиспользуемую.
+        run: |
+          set -euo pipefail
+          go get golang.org/x/mobile@latest
+          go mod tidy
+          go list -m golang.org/x/mobile
+
+      - name: Сборка Go-ядра (bridge.aar)
+        working-directory: android
+        run: |
+          set -euo pipefail
+          gomobile init
+          mkdir -p app/libs
+          # -javapkg задаёт Java-пакет классов, иначе gomobile кладёт их в
+          # пакет с именем Go-пакета («bridge»), и Java-код их не находит.
+          gomobile bind \
+            -target=android/arm,android/arm64,android/amd64 \
+            -androidapi 21 \
+            -javapkg=com.mikrotik.inspector \
+            -ldflags "-s -w -X github.com/zigorminsk-debug/my-mikrotik/android/bridge.version=${{ steps.ver.outputs.version }}" \
+            -o app/libs/bridge.aar \
+            github.com/zigorminsk-debug/my-mikrotik/android/bridge
+          ls -lh app/libs/
+
+      - name: Сборка APK (Gradle)
+        working-directory: android
+        run: |
+          set -euo pipefail
+          gradle --no-daemon -p . :app:assembleDebug \
+            -PappVersion="${{ steps.ver.outputs.version }}" \
+            -PversionCode="${{ steps.ver.outputs.code }}" \
+            > /tmp/gradle.log 2>&1 || {
+              tail -30 /tmp/gradle.log
+              grep -n -i -E "error|what went wrong|could not|unresolved|Caused by" /tmp/gradle.log | head -10 \
+                | while IFS= read -r line; do echo "::error::GRADLE| ${line:0:900}"; done
+              exit 1
+            }
+          tail -8 /tmp/gradle.log
+          find app/build/outputs -name "*.apk" -exec ls -lh {} \;
+
+      - name: Подпись release-APK (если заданы секреты)
+        if: github.ref_type == 'tag'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        working-directory: android
+        run: |
+          set -euo pipefail
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "Секреты подписи не заданы — публикуется debug-APK (устанавливается на телефон)."
+            exit 0
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > /tmp/release.keystore
+          export ANDROID_KEYSTORE_PATH=/tmp/release.keystore
+          gradle --no-daemon -p . :app:assembleRelease \
+            -PappVersion="${{ steps.ver.outputs.version }}" \
+            -PversionCode="${{ steps.ver.outputs.code }}"
+
+      - name: Переименование APK
+        run: |
+          set -euo pipefail
+          V="${{ steps.ver.outputs.version }}"
+          mkdir -p out
+          DEBUG_APK="$(find android -name "*.apk" 2>/dev/null | head -1)"
+          if [ -z "$DEBUG_APK" ]; then
+            echo "::error::APK не найден после сборки Gradle"
+            exit 1
+          fi
+          cp "$DEBUG_APK" "out/mikrotik-inspector-${V}-android.apk"
+          REL_APK="$(find android/app/build/outputs -path "*release*" -name "*.apk" 2>/dev/null | head -1 || true)"
+          if [ -n "$REL_APK" ]; then
+            cp "$REL_APK" "out/mikrotik-inspector-${V}-android-release.apk"
+          fi
+          cd out && sha256sum * > SHA256SUMS-android.txt && cd ..
+          ls -lh out/
+          SIZE="$(stat -c%s "out/mikrotik-inspector-${V}-android.apk")"
+          echo "::notice::APK собран: mikrotik-inspector-${V}-android.apk, ${SIZE} байт"
+
+      - name: Загрузка APK как артефакта
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-apk
+          path: out/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Публикация APK в Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v3
+        with:
+          files: out/*
+          tag_name: ${{ github.ref_name }}
+          body: |
+            **MikroTik Inspector ${{ steps.ver.outputs.version }}**
+
+            Android: скачайте `mikrotik-inspector-${{ steps.ver.outputs.version }}-android.apk`
+            и установите на телефон (разрешите установку из неизвестных источников).
+            Приложение не требует root: подключение идёт напрямую к роутеру
+            в вашей локальной сети по RouterOS API (8728) или REST (80/443).
