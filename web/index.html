@@ -855,7 +855,7 @@
     row.appendChild(document.createElement("legend"));
     var grid = document.createElement("div"); grid.className = "grid";
     [["mode", "Тип подключения", "select"], ["iface", "Интерфейс провайдера", "select"],
-     ["apn", "APN оператора LTE", "text"],
+     ["apn", "APN LTE (необязательно; пусто — автоматически)", "text"],
      ["address", "Статический IPv4/CIDR", "text"], ["gateway", "Шлюз статического канала", "text"],
      ["distance", "Приоритет (по роли провайдера)", "number"],
      ["nat", "NAT masquerade", "checkbox"], ["checkGateway", "Ping шлюза (только static)", "checkbox"]].forEach(function (spec) {

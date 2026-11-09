@@ -55,9 +55,6 @@ func validateWAN(s WANSettings, pppoe PPPoESettings) []string {
 			if r.CheckGateway {
 				problems = append(problems, "ping шлюза для LTE не поддерживается")
 			}
-			if strings.TrimSpace(r.APN) == "" {
-				problems = append(problems, "укажите APN оператора")
-			}
 		case "dhcp":
 			if r.CheckGateway {
 				problems = append(problems, "ping шлюза в режиме DHCP пока не поддерживается")
@@ -102,9 +99,9 @@ func buildWAN(b *strings.Builder, s WANSettings, device *Info, ifaces []Iface) {
 		if r.Mode == "lte" {
 			name := fmt.Sprintf("mti-wan-%d-apn", i)
 			fmt.Fprintf(b, ":if ([:len [/interface lte apn find where name=%s]] = 0) do={ /interface lte apn add %s }\n", rosQuote(name), attr("name", name))
-			fmt.Fprintf(b, "/interface lte apn set [find where name=%s] %s add-default-route=yes default-route-distance=%d use-peer-dns=no\n", rosQuote(name), attr("apn", r.APN), r.Distance)
+			fmt.Fprintf(b, "/interface lte apn set [find where name=%s] %s add-default-route=yes default-route-distance=%d use-peer-dns=no\n", rosQuote(name), attr("apn", strings.TrimSpace(r.APN)), r.Distance)
 			if device != nil && strings.HasPrefix(device.RouterOS, "7.") {
-				fmt.Fprintf(b, "/interface lte apn set [find where name=%s] use-network-apn=no\n", rosQuote(name))
+				fmt.Fprintf(b, "/interface lte apn set [find where name=%s] use-network-apn=%s\n", rosQuote(name), yesNo(strings.TrimSpace(r.APN) == ""))
 			}
 			fmt.Fprintf(b, "/interface lte set [find where name=%s] %s disabled=no\n", rosQuote(r.Interface), attr("apn-profiles", name))
 		} else if r.Mode == "dhcp" {

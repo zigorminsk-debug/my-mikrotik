@@ -112,7 +112,32 @@ func TestLTEInterfaceValidation(t *testing.T) {
 		t.Fatal("missing LTE accepted")
 	}
 	s.Links[0].APN = ""
-	if len(validateWAN(s, PPPoESettings{})) == 0 {
-		t.Fatal("empty APN accepted")
+	if len(validateWAN(s, PPPoESettings{})) != 0 {
+		t.Fatal("empty APN must be accepted")
+	}
+}
+
+func TestLTEAutomaticAPN(t *testing.T) {
+	for _, version := range []string{"7.22.3", "6.49.18"} {
+		for _, apn := range []string{"", "internet"} {
+			device := deviceWith("routeros")
+			device.RouterOS = version
+			s := Settings{WAN: WANSettings{Enabled: true, Links: []WANLink{{Interface: "lte1", Mode: "lte", APN: apn, Distance: 1}}}}
+			res := Generate(device, []Iface{{Name: "lte1", Type: "lte"}}, &s, time.Time{})
+			if !res.OK {
+				t.Fatal(res.Error)
+			}
+			if !strings.Contains(res.Script, attr("apn", apn)) {
+				t.Fatal("APN not set/reset")
+			}
+			if strings.HasPrefix(version, "7.") {
+				want := "use-network-apn=" + yesNo(apn == "")
+				if !strings.Contains(res.Script, want) {
+					t.Fatalf("missing %s", want)
+				}
+			} else if strings.Contains(res.Script, "use-network-apn=") {
+				t.Fatal("ROS7-only option on ROS6")
+			}
+		}
 	}
 }
