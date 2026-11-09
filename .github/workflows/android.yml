@@ -125,7 +125,7 @@ jobs:
         working-directory: android
         run: |
           set -euo pipefail
-          gradle --no-daemon -p . :app:assembleDebug \
+          gradle --no-daemon -p . :app:testDebugUnitTest :app:assembleDebug \
             -PappVersion="${{ steps.ver.outputs.version }}" \
             -PversionCode="${{ steps.ver.outputs.code }}" \
             > /tmp/gradle.log 2>&1 || {
@@ -162,8 +162,8 @@ jobs:
           set -euo pipefail
           V="${{ steps.ver.outputs.version }}"
           mkdir -p out
-          DEBUG_APK="$(find android -name "*.apk" 2>/dev/null | head -1)"
-          if [ -z "$DEBUG_APK" ]; then
+          DEBUG_APK="android/app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$DEBUG_APK" ]; then
             echo "::error::APK не найден после сборки Gradle"
             exit 1
           fi
@@ -194,7 +194,7 @@ jobs:
           body: |
             **MikroTik Inspector ${{ steps.ver.outputs.version }}**
 
-            Android: скачайте `mikrotik-inspector-${{ steps.ver.outputs.version }}-android.apk`
+            Android: для обновлений скачайте подписанный `mikrotik-inspector-${{ steps.ver.outputs.version }}-android-release.apk` (если опубликован)
             и установите на телефон (разрешите установку из неизвестных источников).
             Приложение не требует root: подключение идёт напрямую к роутеру
             в вашей локальной сети по RouterOS API (8728) или REST (80/443).

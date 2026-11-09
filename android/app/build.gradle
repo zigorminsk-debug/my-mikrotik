@@ -58,6 +58,7 @@ android {
 }
 
 dependencies {
+    testImplementation 'junit:junit:4.13.2'
     // bridge.aar — привязки к Go-ядру, собираются командой:
     //   gomobile bind -target=android -androidapi 21 -o app/libs/bridge.aar <модуль>/bridge
     implementation fileTree(dir: 'libs', include: ['*.aar', '*.jar'])

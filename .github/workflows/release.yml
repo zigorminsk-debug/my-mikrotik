@@ -33,7 +33,7 @@ jobs:
           set -euo pipefail
           V="${{ steps.ver.outputs.version }}"
           mkdir -p dist
-          go build -trimpath -ldflags "-s -w -X main.version=${V}" \
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=${V}" \
             -o "dist/mikrotik-inspector-${V}-windows-amd64.exe" .
           GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=${V}" \
             -o "dist/mikrotik-inspector-${V}-linux-amd64" .
@@ -48,8 +48,44 @@ jobs:
           body: |
             **MikroTik Inspector ${{ steps.ver.outputs.version }}**
 
-            Windows: скачайте `mikrotik-inspector-${{ steps.ver.outputs.version }}-windows-amd64.exe`,
-            запустите двойным щелчком — откроется HTML-интерфейс в браузере.
+            Windows: установщик `mikrotik-inspector-${{ steps.ver.outputs.version }}-windows-setup.exe`
+            публикуется отдельным заданием. Также доступен портативный windows-amd64.exe.
+            Для окна приложения требуется Microsoft Edge.
 
             Android APK собирается отдельным workflow (`Android APK`) и добавляется
-            в этот же релиз: `mikrotik-inspector-<версия>-android.apk`.
+            в этот же релиз. Для автообновления нужен подписанный android-release.apk.
+
+  windows-setup:
+    needs: release
+    name: Установщик Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Сборка приложения и установщика
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart('v')
+          New-Item -ItemType Directory -Force dist | Out-Null
+          go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=v$v" -o dist/mikrotik-inspector.exe .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$v" "/DSourceExe=$PWD\dist\mikrotik-inspector.exe" "/DOutputDir=$PWD\dist" windows/setup.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $setup = Get-Item "dist/mikrotik-inspector-v$v-windows-setup.exe"
+          $hash = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLower()
+          "$hash  $($setup.Name)" | Out-File -Encoding ascii dist/SHA256SUMS-windows-setup.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-setup
+          path: |
+            dist/*-windows-setup.exe
+            dist/SHA256SUMS-windows-setup.txt
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            dist/*-windows-setup.exe
+            dist/SHA256SUMS-windows-setup.txt

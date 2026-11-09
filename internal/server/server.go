@@ -55,6 +55,8 @@ func NewMux(opt Options) http.Handler {
 	mux.HandleFunc("/api/info", handleInfo(ver))
 	mux.HandleFunc("/api/interfaces", handleInterfaces(ver))
 	mux.HandleFunc("/api/config", handleConfig)
+	mux.HandleFunc("/api/geo/countries", handleGeoCountries)
+	mux.HandleFunc("/api/geo/prefixes", handleGeoPrefixes)
 	mux.HandleFunc("/api/apply", handleApply(ver))
 
 	return withSecurityHeaders(mux)
@@ -168,7 +170,7 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req mikrotik.ConfigRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 8<<20)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, apiResponse{OK: false, Error: "некорректный запрос: " + err.Error()})
 		return
 	}
@@ -261,18 +263,48 @@ func LocalURLs(port int) []string {
 }
 
 // ListenAndServe запускает сервер на addr и возвращает фактический адрес
-// (полезно при addr с портом 0). Возвращает управление сразу после запуска.
+// (полезно при addr с портом 0). Работает до остановки сервера или ошибки.
 func ListenAndServe(addr string, h http.Handler, ready func(addr string) error) error {
+	return ListenAndServeUntil(addr, h, ready, nil)
+}
+
+// ListenAndServeUntil closes the server when the desktop window exits.
+// A nil done channel keeps the server running until it fails.
+func ListenAndServeUntil(addr string, h http.Handler, ready func(string) error, done func() <-chan error) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("не удалось запустить сервер: %w", err)
 	}
+	srv := &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second}
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve(ln) }()
+	// The listener must serve before the GUI navigates to it. Closing the
+	// listener explicitly also covers a callback failure before Serve starts.
 	if ready != nil {
 		if err := ready(ln.Addr().String()); err != nil {
+			_ = srv.Close()
 			_ = ln.Close()
+			<-served
 			return err
 		}
 	}
-	srv := &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second}
-	return srv.Serve(ln)
+	var window <-chan error
+	if done != nil {
+		window = done()
+	}
+	select {
+	case err := <-served:
+		if err == http.ErrServerClosed {
+			return nil
+		}
+		return err
+	case windowErr := <-window:
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			_ = srv.Close()
+		}
+		<-served
+		return windowErr
+	}
 }

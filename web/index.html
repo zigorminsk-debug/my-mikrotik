@@ -62,7 +62,7 @@
     gap: 14px 16px;
   }
   label.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
-  input, select {
+  input, select, textarea {
     font: inherit;
     padding: 9px 11px;
     border: 1px solid var(--border);
@@ -72,8 +72,8 @@
     outline: none;
     transition: border-color .15s, box-shadow .15s;
   }
-  input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37, 99, 235, .15); background: #fff; }
-  input:disabled, select:disabled { background: #f1f5f9; color: #94a3b8; cursor: not-allowed; }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37, 99, 235, .15); background: #fff; }
+  input:disabled, select:disabled, textarea:disabled { background: #f1f5f9; color: #94a3b8; cursor: not-allowed; }
   .row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
   .checkbox { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink); font-weight: 500; cursor: pointer; user-select: none; }
   .checkbox input { width: 16px; height: 16px; accent-color: var(--accent); }
@@ -486,6 +486,60 @@
             </div>
           </div>
 
+          <div class="menu-group"><div class="menu-title">Безопасность</div>
+            <div class="sec" data-feat="security">
+              <label class="sec-head" for="chk-security"><input type="checkbox" id="chk-security"><span class="sec-title">Защита извне — только WinBox</span><span class="sec-path mono">/ip firewall filter</span><span class="lock" hidden></span></label>
+              <div class="sec-body"><div class="grid">
+                <label class="field">Все внешние WAN-интерфейсы (до 3, множественный выбор)<select id="security-wan" multiple size="5"></select></label>
+                <label class="field">Доверенные IPv4 / CIDR для WinBox (до 4, через запятую)<input id="security-trusted" placeholder="192.168.88.0/24, 203.0.113.10/32" spellcheck="false"></label>
+                <label class="field">TCP-порт WinBox<input type="number" id="security-port" value="8291" min="1" max="65535"></label>
+              </div>
+              <label class="checkbox"><input type="checkbox" id="security-ack"> Я сохранил резервную копию, указал IP своего WinBox и имею доступ к физической консоли для восстановления</label>
+              <div class="sec-note">Опасность потери доступа! Сначала выключите остальные разделы конструктора: защита применяется отдельным скриптом. Укажите ВСЕ внешние интерфейсы, включая PPPoE; в доверенные адреса включите свой текущий IP и локальную сеть управления. Защита не охватывает невыбранные интерфейсы и транзитный трафик. IPv6 WinBox не разрешён. Из WAN остаются только WinBox с доверенных адресов, существующие соединения и служебный DHCP/ICMPv6. Входящие VPN и проброс доступа к сервисам роутера будут заблокированы. MAC-WinBox и другие сервисы управления (включая API/REST) отключаются глобально — приложение потеряет подключение. Скрипт можно только скопировать и выполнить в WinBox New Terminal с включённым Safe Mode. Это не замена аудиту и резервной копии.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="menu-group"><div class="menu-title">Доступ к ресурсам за NAT</div>
+            <div class="sec" data-feat="geoNat">
+              <label class="sec-head" for="chk-geoNat"><input type="checkbox" id="chk-geoNat"><span class="sec-title">Белый список для проброшенного ресурса</span><span class="sec-path mono">/ip firewall filter</span><span class="lock" hidden></span></label>
+              <div class="sec-body">
+                <div class="grid">
+                  <label class="field">Идентификатор ресурса (латиница, до 20 знаков)<input id="geo-id" placeholder="server1" spellcheck="false"></label>
+                  <label class="field">Внешний WAN-интерфейс<select id="geo-wan"></select></label>
+                  <label class="field">Внутренний IPv4 после dst-nat<input id="geo-destination" placeholder="192.168.88.10" spellcheck="false"></label>
+                  <label class="field">Внутренний порт после dst-nat<input id="geo-port" type="number" min="1" max="65535" placeholder="443"></label>
+                  <label class="field">Протокол<select id="geo-protocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select></label>
+                  <label class="field">Дополнительные IPv4 / CIDR (через запятую или с новой строки)<textarea id="geo-manual" rows="3" placeholder="203.0.113.5, 198.51.100.0/24" spellcheck="false"></textarea></label>
+                </div>
+                <label class="field">Поиск страны<input id="geo-search" placeholder="Название или код страны" autocomplete="off"></label>
+                <div id="geo-country-list" style="max-height:180px;overflow:auto;border:1px solid #cbd5e1;padding:8px" aria-label="Выбор стран"></div>
+                <div class="actions"><button type="button" class="ghost" id="geo-load">Загрузить IP выбранных стран</button></div>
+                <div id="geo-status" class="sec-note">Страны можно не выбирать, если указаны отдельные адреса.</div>
+                <label class="checkbox"><input type="checkbox" id="geo-ack"> Я проверил ресурс, WAN-интерфейс и сохранил резервную копию</label>
+                <div class="sec-note">Выключите другие разделы: это отдельный скрипт для одного существующего dst-nat, он не создаёт проброс. Правила затрагивают только выбранный WAN, внутренний IPv4, порт и протокол; их accept имеет приоритет над существующими правилами. Все пробросы на этот внутренний адрес и порт через выбранный WAN попадут под правило, независимо от внешнего порта. IPv6, непроброшенные соединения и другие WAN не защищены. Уже работающие FastTrack-соединения могут сохраняться до очистки conntrack. Для каждого другого ресурса используйте отдельный идентификатор. Страны определяются по RIR-делегированию адресов: геолокация приблизительная, VPN/proxy её обходят. Обновляйте список вручную (кэш данных — 12 часов). Кнопка «Применить» для этого раздела отключена. Большие скрипты загружайте как .rsc и импортируйте локально; Safe Mode не рассчитан на тысячи изменений.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="menu-group"><div class="menu-title">VPN</div>
+<div class="sec" data-feat="wgServer"><label class="sec-head" for="chk-wgServer"><input type="checkbox" id="chk-wgServer"><span class="sec-title">WireGuard — MikroTik сервер</span><span class="sec-path mono">/interface wireguard</span><span class="lock" hidden></span></label><div class="sec-body"><div class="grid"><label class="field">Приватный ключ этого MikroTik<input id="wgServer-privateKey" type="password" value="" autocomplete="off" spellcheck="false"></label><label class="field">Публичный ключ другой стороны<input id="wgServer-publicKey" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">Адрес интерфейса с маской<input id="wgServer-address" type="text" value="10.10.10.1/24" autocomplete="off" spellcheck="false"></label><label class="field">Allowed Address: сети другой стороны (CIDR)<input id="wgServer-allowedIPs" type="text" value="10.10.10.2/32" autocomplete="off" spellcheck="false"></label><label class="field">Локальный UDP-порт<input id="wgServer-listenPort" type="number" min="1" max="65535" value="13231" autocomplete="off" spellcheck="false"></label></div><div class="sec-note">WireGuard использует только UDP. Порты можно изменить; порт сервера в клиенте должен совпадать с локальным портом сервера. Ключи создайте заранее. На сервере разрешите входящий UDP-порт; маршруты и firewall на обеих сторонах настройте отдельно. Создаётся один peer. Повторное применение требует ручного удаления созданного интерфейса.</div></div></div>
+<div class="sec" data-feat="wgClient"><label class="sec-head" for="chk-wgClient"><input type="checkbox" id="chk-wgClient"><span class="sec-title">WireGuard — MikroTik клиент</span><span class="sec-path mono">/interface wireguard</span><span class="lock" hidden></span></label><div class="sec-body"><div class="grid"><label class="field">Приватный ключ этого MikroTik<input id="wgClient-privateKey" type="password" value="" autocomplete="off" spellcheck="false"></label><label class="field">Публичный ключ другой стороны<input id="wgClient-publicKey" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">Адрес интерфейса с маской<input id="wgClient-address" type="text" value="10.10.10.2/24" autocomplete="off" spellcheck="false"></label><label class="field">Allowed Address: сети другой стороны (CIDR)<input id="wgClient-allowedIPs" type="text" value="10.10.10.0/24" autocomplete="off" spellcheck="false"></label><label class="field">Локальный UDP-порт<input id="wgClient-listenPort" type="number" min="1" max="65535" value="13231" autocomplete="off" spellcheck="false"></label><label class="field">Адрес сервера<input id="wgClient-endpoint" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">UDP-порт сервера<input id="wgClient-endpointPort" type="number" min="1" max="65535" value="13231" autocomplete="off" spellcheck="false"></label></div><div class="sec-note">WireGuard использует только UDP. Порты можно изменить; порт сервера в клиенте должен совпадать с локальным портом сервера. Ключи создайте заранее. На сервере разрешите входящий UDP-порт; маршруты и firewall на обеих сторонах настройте отдельно. Создаётся один peer. Повторное применение требует ручного удаления созданного интерфейса.</div></div></div>
+<div class="sec" data-feat="ovpnCertificates">
+  <label class="sec-head" for="chk-ovpnCertificates"><input type="checkbox" id="chk-ovpnCertificates"><span class="sec-title">OpenVPN — выпуск сертификатов</span><span class="sec-path mono">/certificate</span><span class="lock" hidden></span></label>
+  <div class="sec-body"><div class="grid">
+    <label class="field">DNS-имя или IP сервера OpenVPN<input id="ovpnCertificates-serverName" placeholder="vpn.example.com" spellcheck="false"></label>
+    <label class="field">Имя клиента для сертификата<input id="ovpnCertificates-clientName" value="client1" spellcheck="false"></label>
+    <label class="field">Пароль экспорта PKCS12 (от 12 байт)<input id="ovpnCertificates-exportPassword" type="password" autocomplete="new-password"></label>
+  </div><div class="sec-note">Запускайте на серверном MikroTik с точным временем. Создаются новый CA, серверный и один клиентский сертификат; существующий CA не используется. Сервер OpenVPN не включается автоматически. Пароль попадёт в скрипт. Файлы CA и PKCS12 передавайте клиенту защищённо, затем удалите PKCS12 с роутера. Повторное применение остановится, если сертификаты mti-ovpn уже существуют.</div></div>
+</div>
+<div class="sec" data-feat="openvpn"><label class="sec-head" for="chk-openvpn"><input type="checkbox" id="chk-openvpn"><span class="sec-title">OpenVPN клиент</span><span class="sec-path mono">/interface ovpn-client</span><span class="lock" hidden></span></label><div class="sec-body"><div class="grid"><label class="field">Адрес сервера<input id="openvpn-server" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">Логин<input id="openvpn-user" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">Пароль<input id="openvpn-password" type="password" value="" autocomplete="off" spellcheck="false"></label><label class="field">Транспорт<select id="openvpn-protocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select></label><label class="field">Порт сервера<input id="openvpn-port" type="number" min="1" max="65535" value="1194"></label><label class="field">Выход в интернет<select id="openvpn-exit"><option value="local">Через локальный шлюз</option><option value="vpn">Через сервер VPN</option></select></label><label class="field">Имя клиентского сертификата (если требуется)<input id="openvpn-certificate" type="text" value="" autocomplete="off" spellcheck="false"></label></div><div class="sec-note">Выбор действует для MikroTik и экспортируемого профиля. Маршруты, получаемые от VPN-сервера, отключены: маршруты к удалённым сетям добавьте вручную. При выходе через VPN проверьте приоритеты существующих маршрутов и настройте NAT на сервере; равные приоритеты могут направлять трафик через WAN. При обрыве VPN возможен выход через WAN; это не kill switch. DNS и IPv6 настраиваются отдельно.</div>
+<div class="grid"><label class="field">CA-сертификат для .ovpn (PEM .crt)<input type="file" id="openvpn-ca-file" accept=".crt,.pem"></label><label class="field">Клиентский PKCS12 для .ovpn (если нужен)<input type="file" id="openvpn-p12-file" accept=".p12,.pfx"></label><label class="field">CN серверного сертификата для .ovpn<input id="openvpn-server-cn" placeholder="по умолчанию адрес сервера" spellcheck="false"></label></div>
+<div class="actions"><button type="button" class="ghost" id="btn-ovpn-export">Скачать профиль клиента .ovpn</button></div><div class="sec-note">Для OpenVPN 2.6+. Файл содержит логин, пароль и при выборе PKCS12 — закрытый ключ. Передавайте и храните его защищённо. Пароль PKCS12 клиент запросит при подключении.</div>
+<div class="sec-note">TCP или UDP и порт должны совпадать с настройками сервера. Режим IP, AES-256-CBC / SHA1; сервер должен поддерживать эти параметры. Импортируйте доверенный CA и при необходимости клиентский сертификат до применения. Маршруты и firewall настраиваются отдельно. Повторное применение требует ручного удаления подключения.</div></div></div>
+<div class="sec" data-feat="pptp"><label class="sec-head" for="chk-pptp"><input type="checkbox" id="chk-pptp"><span class="sec-title">PPTP клиент</span><span class="sec-path mono">/interface pptp-client</span><span class="lock" hidden></span></label><div class="sec-body"><div class="grid"><label class="field">Адрес сервера<input id="pptp-server" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">Логин<input id="pptp-user" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">Пароль<input id="pptp-password" type="password" value="" autocomplete="off" spellcheck="false"></label></div><div class="sec-note">PPTP устарел и небезопасен; по возможности используйте WireGuard. Маршруты и firewall настраиваются отдельно. Повторное применение требует ручного удаления подключения.</div></div></div>
+          </div>
+
           <div class="actions">
             <button type="button" class="ghost" id="refresh">Обновить данные устройства</button>
           </div>
@@ -549,7 +603,7 @@
     ["uptime", "Аптайм"]
   ];
 
-  var FEATURES = ["lan", "dhcp", "dns", "ntp", "pppoe", "wifi"];
+  var FEATURES = ["lan", "dhcp", "dns", "ntp", "pppoe", "wifi", "wgServer", "wgClient", "openvpn", "pptp", "ovpnCertificates", "security", "geoNat"];
   var DEFAULT_ON = ["lan", "dhcp"];
   var DEFAULTS = { "dns-remote": true, "pppoe-route": true, "pppoe-dns": true, "pppoe-nat": true };
 
@@ -760,6 +814,15 @@
     var ethernet = lastIfaces;
     var wifi = lastIfaces.filter(isWifi);
 
+    var wanSelect = $("security-wan");
+    var chosen = Array.from(wanSelect.selectedOptions).map(function (o) { return o.value; });
+    wanSelect.textContent = "";
+    ethernet.forEach(function (i) {
+      var o = document.createElement("option"); o.value = i.name;
+      o.textContent = i.name + ifaceTypeLabel(i) + (i.disabled ? " · выключен" : "");
+      o.disabled = !!i.disabled; o.selected = chosen.indexOf(i.name) >= 0 && !i.disabled; wanSelect.appendChild(o);
+    });
+    fillSelect($("geo-wan"), ethernet, null);
     fillSelect($("pppoe-iface"), ethernet, preferEther);
     fillSelect($("lan-iface"), ethernet, preferLan);
     fillSelect($("dhcp-iface"), ethernet, preferLan);
@@ -810,8 +873,16 @@
   function chk(id) { return $(id).checked; }
   function val(id) { return $(id).value.trim(); }
 
+  function collectWG(id) {
+    return {enabled: chk("chk-"+id), privateKey: val(id+"-privateKey"), publicKey: val(id+"-publicKey"), address: val(id+"-address"), allowedIPs: val(id+"-allowedIPs"), listenPort: val(id+"-listenPort"), endpoint: id === "wgClient" ? val(id+"-endpoint") : "", endpointPort: id === "wgClient" ? val(id+"-endpointPort") : ""};
+  }
+  function collectVPN(id) {
+    return {enabled: chk("chk-"+id), server: val(id+"-server"), user: val(id+"-user"), password: $(id+"-password").value, port: id === "openvpn" ? val(id+"-port") : "", protocol: id === "openvpn" ? val(id+"-protocol") : "", certificate: id === "openvpn" ? val(id+"-certificate") : "", exitViaVPN: id === "openvpn" && val("openvpn-exit") === "vpn"};
+  }
   function collect() {
     return {
+      geoNat: {enabled: chk("chk-geoNat"), resource: val("geo-id"), wan: val("geo-wan"), destination: val("geo-destination"), port: val("geo-port"), protocol: val("geo-protocol"), countries: selectedGeoCountries(), countryPrefixes: loadedGeoKey === selectedGeoCountries().join(",") ? geoPrefixes : [], manual: $("geo-manual").value, acknowledged: chk("geo-ack")},
+      security: {enabled: chk("chk-security"), wan: Array.from($("security-wan").selectedOptions).map(function (o) { return o.value; }), trusted: val("security-trusted"), winboxPort: val("security-port"), acknowledged: chk("security-ack")},
       lan: { enabled: chk("chk-lan"), iface: val("lan-iface"), address: val("lan-addr") },
       dhcp: {
         enabled: chk("chk-dhcp"), iface: val("dhcp-iface"),
@@ -824,6 +895,11 @@
         user: val("pppoe-user"), password: $("pppoe-pass").value, serviceName: val("pppoe-service"),
         defaultRoute: chk("pppoe-route"), usePeerDNS: chk("pppoe-dns"), nat: chk("pppoe-nat")
       },
+      wgServer: collectWG("wgServer"),
+      wgClient: collectWG("wgClient"),
+      ovpnCertificates: {enabled: chk("chk-ovpnCertificates"), serverName: val("ovpnCertificates-serverName"), clientName: val("ovpnCertificates-clientName"), exportPassword: $("ovpnCertificates-exportPassword").value},
+      openvpn: collectVPN("openvpn"),
+      pptp: collectVPN("pptp"),
       wifi: {
         enabled: chk("chk-wifi"), iface: val("wifi-iface"), ssid: val("wifi-ssid"),
         passphrase: $("wifi-pass").value, country: val("wifi-country")
@@ -838,7 +914,8 @@
   }
 
   function setActions(enabled) {
-    ["btn-copy", "btn-apply", "btn-download"].forEach(function (id) { $(id).disabled = !enabled; });
+    ["btn-copy", "btn-download"].forEach(function (id) { $(id).disabled = !enabled; });
+    $("btn-apply").disabled = !enabled || chk("chk-security") || chk("chk-geoNat");
   }
 
   // ------------------------------------------------------------------
@@ -846,6 +923,10 @@
   // ------------------------------------------------------------------
   function schedulePreview() {
     clearTimeout(previewTimer);
+    previewSeq++; // сразу делаем предыдущий результат недействительным
+    currentScript = "";
+    setActions(false);
+    if (lastInfo) setScriptState("обновление…");
     previewTimer = setTimeout(preview, 220);
   }
 
@@ -877,8 +958,8 @@
           err.style.display = "none";
           err.textContent = "";
           currentScript = res.script || "";
-          $("script").textContent = currentScript;
-          setScriptState("готов к применению", "good");
+          $("script").textContent = currentScript.length > 30000 ? currentScript.slice(0, 30000) + "\n\n# Предпросмотр сокращён. Полный скрипт доступен в .rsc и при копировании." : currentScript;
+          setScriptState(chk("chk-geoNat") ? "готов к скачиванию" : "готов к применению", "good");
           setActions(currentScript.indexOf("# Настройки не выбраны") < 0);
           if (currentScript.indexOf("# Настройки не выбраны") >= 0) setScriptState("нет включённых разделов");
         }
@@ -916,6 +997,45 @@
       });
   }
 
+  // Страны загружаются только по запросу; список привязан к текущему выбору.
+  var geoCountries = [], geoSelected = {}, geoPrefixes = [], loadedGeoKey = "", geoLoadSequence = 0;
+  function selectedGeoCountries() { return Object.keys(geoSelected).filter(function (c) { return geoSelected[c]; }).sort(); }
+  function renderGeoCountries() {
+    var list = $("geo-country-list"), query = val("geo-search").toLowerCase(); list.textContent = "";
+    var names = typeof Intl.DisplayNames === "function" ? new Intl.DisplayNames(["ru"], {type:"region"}) : null;
+    geoCountries.forEach(function (code) {
+      var labelText = (names ? names.of(code.toUpperCase()) : code.toUpperCase()) + " (" + code.toUpperCase() + ")";
+      if (labelText.toLowerCase().indexOf(query) < 0) return;
+      var label = document.createElement("label"); label.className = "checkbox"; label.style.display = "block";
+      var input = document.createElement("input"); input.type = "checkbox"; input.checked = !!geoSelected[code];
+      input.addEventListener("change", function () {
+        geoSelected[code] = input.checked; geoPrefixes = []; loadedGeoKey = ""; geoLoadSequence++;
+        $("geo-status").textContent = "Выбор изменён: загрузите IP выбранных стран заново."; schedulePreview();
+      });
+      label.appendChild(input); label.appendChild(document.createTextNode(" " + labelText)); list.appendChild(label);
+    });
+  }
+  $("geo-search").addEventListener("input", renderGeoCountries);
+  fetch("/api/geo/countries").then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }).then(function (data) {
+    if (!data.ok) throw new Error(data.error || "ошибка"); geoCountries = data.countries || []; renderGeoCountries();
+  }).catch(function (e) { $("geo-status").textContent = "Не удалось получить список стран: " + (e.message || e); });
+  $("geo-load").addEventListener("click", function () {
+    var countries = selectedGeoCountries(), btn = this, seq = ++geoLoadSequence;
+    geoPrefixes = []; loadedGeoKey = ""; schedulePreview();
+    if (!countries.length) { $("geo-status").textContent = "Выберите хотя бы одну страну или используйте только отдельные адреса."; return; }
+    if (countries.length > 12) { $("geo-status").textContent = "Можно выбрать не более 12 стран."; return; }
+    btn.disabled = true; $("geo-status").textContent = "Загрузка сетей из ipverse…";
+    fetch("/api/geo/prefixes", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({countries:countries})})
+      .then(function (r) { return r.json(); }).then(function (data) {
+        if (seq !== geoLoadSequence) return;
+        if (!data.ok) throw new Error(data.error || "ошибка загрузки");
+        geoPrefixes = data.prefixes || []; loadedGeoKey = countries.join(",");
+        $("geo-status").textContent = "Загружено сетей: " + geoPrefixes.length + "; получено " + data.fetchedAt + ". Источник — ipverse/RIR.";
+        schedulePreview();
+      }).catch(function (e) { if (seq === geoLoadSequence) { $("geo-status").textContent = "Ошибка загрузки: " + (e.message || e); schedulePreview(); } })
+      .finally(function () { btn.disabled = false; });
+  });
+
   // ------------------------------------------------------------------
   // обработчики конструктора
   // ------------------------------------------------------------------
@@ -948,6 +1068,20 @@
     el.addEventListener("input", schedulePreview);
     el.addEventListener("change", schedulePreview);
   });
+
+  document.querySelectorAll('.menu-group .sec[data-feat="wgServer"] input:not([type=checkbox]), .menu-group .sec[data-feat="wgClient"] input:not([type=checkbox]), .menu-group .sec[data-feat="openvpn"] input:not([type=checkbox]), .menu-group .sec[data-feat="pptp"] input:not([type=checkbox]), .menu-group .sec[data-feat="ovpnCertificates"] input:not([type=checkbox])').forEach(function (el) {
+    el.addEventListener("input", schedulePreview);
+    el.addEventListener("change", schedulePreview);
+  });
+
+  ["security-wan", "security-trusted", "security-port", "security-ack"].forEach(function (id) {
+    $(id).addEventListener("input", schedulePreview); $(id).addEventListener("change", schedulePreview);
+  });
+  ["geo-id", "geo-wan", "geo-destination", "geo-port", "geo-protocol", "geo-manual", "geo-ack"].forEach(function (id) {
+    $(id).addEventListener("input", schedulePreview); $(id).addEventListener("change", schedulePreview);
+  });
+  $("openvpn-protocol").addEventListener("change", schedulePreview);
+  $("openvpn-exit").addEventListener("change", schedulePreview);
 
   $("dhcp-iface").addEventListener("change", function () { this.dataset.touched = "1"; });
 
@@ -1124,6 +1258,54 @@
     setTimeout(function () { btn.textContent = old; }, 1600);
   }
 
+  // Профиль формируется в браузере: сертификаты не отправляются на сервер приложения.
+  function readVPNFile(file, binary) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onerror = function () { reject(new Error("Не удалось прочитать файл сертификата.")); };
+      reader.onload = function () { resolve(reader.result); };
+      if (binary) reader.readAsArrayBuffer(file); else reader.readAsText(file);
+    });
+  }
+
+  $("btn-ovpn-export").addEventListener("click", async function () {
+    var err = $("build-error"), v = collectVPN("openvpn");
+    try {
+      var caFile = $("openvpn-ca-file").files[0], p12File = $("openvpn-p12-file").files[0];
+      var cn = val("openvpn-server-cn") || v.server;
+      if (!/^[A-Za-z0-9][A-Za-z0-9.:-]*$/.test(v.server) || !/^[A-Za-z0-9][A-Za-z0-9.:-]*$/.test(cn)) throw new Error("Укажите корректные адрес сервера и CN его сертификата (только буквы, цифры, точки, дефисы и двоеточия).");
+      if (!/^[0-9]+$/.test(v.port) || Number(v.port) < 1 || Number(v.port) > 65535) throw new Error("Порт должен быть от 1 до 65535.");
+      if (!v.user || !v.password || /[\r\n\x00-\x1f<>]/.test(v.user + v.password)) throw new Error("Укажите логин и пароль без управляющих символов и знаков < >.");
+      if (!caFile || caFile.size > 1048576 || (p12File && p12File.size > 1048576)) throw new Error("Выберите PEM-файл CA; размер каждого файла — не более 1 МБ.");
+      var ca = (await readVPNFile(caFile, false)).trim();
+      if (!/^-----BEGIN CERTIFICATE-----\s+[A-Za-z0-9+/=\s]+-----END CERTIFICATE-----$/.test(ca)) throw new Error("Файл CA должен содержать один сертификат в формате PEM, без закрытого ключа.");
+      var p12 = "";
+      if (p12File) {
+        var bytes = new Uint8Array(await readVPNFile(p12File, true));
+        if (!bytes.length) throw new Error("Файл PKCS12 пуст.");
+        var chunks = [];
+        for (var i = 0; i < bytes.length; i += 8192) chunks.push(String.fromCharCode.apply(null, bytes.subarray(i, i + 8192)));
+        p12 = btoa(chunks.join("")).match(/.{1,64}/g).join("\n");
+      }
+      if (!window.confirm("Профиль будет содержать логин и пароль" + (p12 ? " и закрытый ключ клиента" : "") + ". Храните и передавайте его защищённо. Продолжить?")) return;
+      var lines = ["client", "dev tun", "proto " + (v.protocol === "udp" ? "udp" : "tcp-client"), "remote " + v.server + " " + v.port,
+        "nobind", "persist-key", "persist-tun", "remote-cert-tls server", "verify-x509-name " + cn + " name",
+        "cipher AES-256-CBC", "data-ciphers AES-256-CBC", "auth SHA1", "route-nopull"];
+      if (v.exitViaVPN) lines.push("redirect-gateway def1");
+      lines.push("<ca>", ca, "</ca>");
+      if (p12) lines.push("<pkcs12>", p12, "</pkcs12>");
+      lines.push("<auth-user-pass>", v.user, v.password, "</auth-user-pass>", "");
+      var blob = new Blob([lines.join("\n")], {type: "application/x-openvpn-profile;charset=utf-8"});
+      var link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "openvpn-client.ovpn";
+      document.body.appendChild(link); link.click();
+      setTimeout(function () { URL.revokeObjectURL(link.href); document.body.removeChild(link); }, 0);
+      err.style.display = "none";
+      flash(this, "Профиль сохранён ✓");
+    } catch (e) {
+      err.style.display = "block"; err.textContent = "Не удалось выгрузить профиль: " + (e.message || e);
+    }
+  });
+
   $("btn-copy").addEventListener("click", function () {
     if (!currentScript) return;
     var btn = this;
@@ -1152,7 +1334,7 @@
   });
 
   $("btn-apply").addEventListener("click", function () {
-    if (!currentScript) return;
+    if (!currentScript || chk("chk-security") || chk("chk-geoNat")) return;
     var host = $("host").value.trim();
     var ok = window.confirm(
       "Применить настройки на роутере " + host + "?\n\n" +

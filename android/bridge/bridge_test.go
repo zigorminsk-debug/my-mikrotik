@@ -11,6 +11,7 @@ import (
 // Тест проверяет, что встроенный сервер поднимается и отдаёт интерфейс —
 // ровно то, что делает Android-обвязка при запуске приложения.
 func TestStartOnServesInterface(t *testing.T) {
+	t.Cleanup(Stop)
 	url, err := StartOn("127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("StartOn: %v", err)
@@ -69,4 +70,21 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func TestStopClosesAndRestarts(t *testing.T) {
+	url, err := StartOn("127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	Stop()
+	client := &http.Client{Timeout: time.Second}
+	if resp, err := client.Get(url); err == nil {
+		resp.Body.Close()
+		t.Fatal("server still listening")
+	}
+	if _, err := StartOn("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	Stop()
 }

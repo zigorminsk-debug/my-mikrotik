@@ -105,9 +105,23 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
+          EXTRA=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then EXTRA="-H windowsgui"; fi
           go build -trimpath \
-            -ldflags "-s -w -X main.version=${VERSION}" \
+            -ldflags "-s -w ${EXTRA} -X main.version=${VERSION}" \
             -o "dist/${{ matrix.artifact }}" .
+
+      - name: Сборка установщика Windows
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=0.0.0" "/DSourceExe=$PWD\dist\${{ matrix.artifact }}" "/DOutputDir=$PWD\dist" windows/setup.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Проверка установленной программы Windows
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: ./windows/smoke-test.ps1 -Installer "$PWD/dist/mikrotik-inspector-v0.0.0-windows-setup.exe"
 
       - name: Загрузка артефакта
         uses: actions/upload-artifact@v7
