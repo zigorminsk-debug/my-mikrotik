@@ -67,12 +67,18 @@ type WiFiSettings struct {
 
 // Settings — все настройки конструктора.
 type Settings struct {
-	LAN   LanSettings   `json:"lan"`
-	DHCP  DHCPSettings  `json:"dhcp"`
-	DNS   DNSSettings   `json:"dns"`
-	NTP   NTPSettings   `json:"ntp"`
-	PPPoE PPPoESettings `json:"pppoe"`
-	WiFi  WiFiSettings  `json:"wifi"`
+	Security         SecuritySettings        `json:"security"`
+	LAN              LanSettings             `json:"lan"`
+	DHCP             DHCPSettings            `json:"dhcp"`
+	DNS              DNSSettings             `json:"dns"`
+	NTP              NTPSettings             `json:"ntp"`
+	PPPoE            PPPoESettings           `json:"pppoe"`
+	WiFi             WiFiSettings            `json:"wifi"`
+	WGServer         WireGuardSettings       `json:"wgServer"`
+	WGClient         WireGuardSettings       `json:"wgClient"`
+	OpenVPN          VPNClientSettings       `json:"openvpn"`
+	OVPNCertificates OVPNCertificateSettings `json:"ovpnCertificates"`
+	PPTP             VPNClientSettings       `json:"pptp"`
 }
 
 // ConfigRequest — запрос на генерацию конфигурации.
@@ -203,6 +209,7 @@ func AnalyzeFeatures(device *Info, ifaces []Iface) []FeatureInfo {
 	wifiIface := hasAnyIface(ifaces, IsWiFiIface)
 
 	features := []FeatureInfo{
+		{ID: "security", Title: "Защита WAN и WinBox", Path: "/ip firewall filter", Package: "system", Available: has("system"), Reason: reasonIf(!has("system"), "system")},
 		{ID: featLAN, Title: "Адреса и подсеть", Path: "/ip address",
 			Package: "system", Available: has("system") || device == nil,
 			Reason: reasonIf(!has("system") && device != nil, "system")},
@@ -219,6 +226,48 @@ func AnalyzeFeatures(device *Info, ifaces []Iface) []FeatureInfo {
 			Package: "ppp", Available: has("ppp"),
 			Reason: reasonIf(!has("ppp"), "ppp")},
 	}
+
+	wgOK := false
+	if device != nil {
+		major := strings.SplitN(device.RouterOS, ".", 2)[0]
+		n, err := strconv.Atoi(major)
+		wgOK = err == nil && n >= 7 && combined
+	}
+	// route-nopull и имена шифров *-cbc появились в RouterOS 7.7.
+	openvpnOK := false
+	if device != nil && combined {
+		parts := strings.SplitN(device.RouterOS, ".", 3)
+		if len(parts) >= 2 {
+			major, err := strconv.Atoi(parts[0])
+			match := regexp.MustCompile(`^[0-9]+`).FindString(parts[1])
+			minor, err2 := strconv.Atoi(match)
+			openvpnOK = err == nil && err2 == nil && (major > 7 || (major == 7 && minor >= 7))
+		}
+	}
+	wgReason := "WireGuard требует RouterOS 7 и пакет routeros"
+	for _, f := range []struct{ id, title string }{{"wgServer", "WireGuard — MikroTik сервер"}, {"wgClient", "WireGuard — MikroTik клиент"}} {
+		reason := ""
+		if !wgOK {
+			reason = wgReason
+		}
+		features = append(features, FeatureInfo{ID: f.id, Title: f.title, Path: "/interface wireguard", Package: "routeros", Available: wgOK, Reason: reason})
+	}
+	for _, f := range []struct{ id, title, path string }{{"openvpn", "OpenVPN клиент", "/interface ovpn-client"}, {"pptp", "PPTP клиент", "/interface pptp-client"}} {
+		available := has("ppp")
+		reason := reasonIf(!available, "ppp")
+		if f.id == "openvpn" && available && !openvpnOK {
+			available = false
+			reason = "данный профиль OpenVPN требует RouterOS 7.7 или новее"
+		}
+		features = append(features, FeatureInfo{ID: f.id, Title: f.title, Path: f.path, Package: "ppp", Available: available, Reason: reason})
+	}
+
+	features = append(features, FeatureInfo{ID: "ovpnCertificates", Title: "OpenVPN — выпуск сертификатов", Path: "/certificate", Package: "routeros", Available: wgOK, Reason: func() string {
+		if !wgOK {
+			return "выпуск сертификатов требует RouterOS 7 и пакет routeros"
+		}
+		return ""
+	}()})
 
 	wifi := FeatureInfo{
 		ID: featWiFi, Title: "Wi-Fi", Path: "/interface wireless",
@@ -416,11 +465,13 @@ func rosQuote(v string) string {
 	b.WriteByte('"')
 	for _, r := range v {
 		switch r {
-		case '"', '\\':
+		case '"', '\\', '$':
 			b.WriteByte('\\')
 			b.WriteRune(r)
 		case '\n':
 			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
 		default:
 			b.WriteRune(r)
 		}
@@ -674,6 +725,25 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 		}
 	}
 
+	if s.Security.Enabled && avail["security"] {
+		errs = append(errs, validateSecurity(s.Security, ifaces, s)...)
+	}
+	if s.WGServer.Enabled && avail["wgServer"] {
+		errs = append(errs, validateWG(s.WGServer, false)...)
+	}
+	if s.WGClient.Enabled && avail["wgClient"] {
+		errs = append(errs, validateWG(s.WGClient, true)...)
+	}
+	if s.OpenVPN.Enabled && avail["openvpn"] {
+		errs = append(errs, validateVPNClient(s.OpenVPN, "OpenVPN", true)...)
+	}
+	if s.OVPNCertificates.Enabled && avail["ovpnCertificates"] {
+		errs = append(errs, validateOVPNCertificates(s.OVPNCertificates)...)
+	}
+	if s.PPTP.Enabled && avail["pptp"] {
+		errs = append(errs, validateVPNClient(s.PPTP, "PPTP", false)...)
+	}
+
 	// Включённые, но недоступные разделы → skipped.
 	for _, f := range features {
 		enabled := false
@@ -690,6 +760,18 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 			enabled = s.PPPoE.Enabled
 		case featWiFi:
 			enabled = s.WiFi.Enabled
+		case "security":
+			enabled = s.Security.Enabled
+		case "wgServer":
+			enabled = s.WGServer.Enabled
+		case "wgClient":
+			enabled = s.WGClient.Enabled
+		case "openvpn":
+			enabled = s.OpenVPN.Enabled
+		case "pptp":
+			enabled = s.PPTP.Enabled
+		case "ovpnCertificates":
+			enabled = s.OVPNCertificates.Enabled
 		}
 		if enabled && !f.Available {
 			res.Skipped = append(res.Skipped, SkippedInfo{ID: f.ID, Title: f.Title, Reason: f.Reason})
@@ -865,6 +947,37 @@ func buildScript(device *Info, s *Settings, now time.Time, avail map[string]bool
 		}
 	}
 
+	if s.WGServer.Enabled && avail["wgServer"] {
+		anyOn = true
+		writeWG(&b, s.WGServer, false)
+	}
+	if s.WGClient.Enabled && avail["wgClient"] {
+		anyOn = true
+		writeWG(&b, s.WGClient, true)
+	}
+	if s.OVPNCertificates.Enabled && avail["ovpnCertificates"] {
+		anyOn = true
+		writeOVPNCertificates(&b, s.OVPNCertificates)
+	}
+	if s.OpenVPN.Enabled && avail["openvpn"] {
+		anyOn = true
+		writeVPNClient(&b, s.OpenVPN, true)
+	}
+	if s.PPTP.Enabled && avail["pptp"] {
+		anyOn = true
+		writeVPNClient(&b, s.PPTP, false)
+	}
+	if s.Security.Enabled && avail["security"] {
+		anyOn = true
+		pkgs := packageSet(device)
+		ipv6 := pkgs["ipv6"]
+		for name := range pkgs {
+			if isCombinedPackage(name) {
+				ipv6 = true
+			}
+		}
+		writeSecurity(&b, s.Security, ipv6)
+	}
 	if !anyOn {
 		b.WriteString("\n# Настройки не выбраны — отметьте разделы в меню конструктора.\n")
 	}

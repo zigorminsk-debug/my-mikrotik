@@ -38,7 +38,9 @@ func main() {
 	h := server.NewMux(server.Options{Version: version, WebRoot: web.Content()})
 
 	log.Printf("MikroTik Inspector %s запущен", version)
-	err := server.ListenAndServe(*addr, h, func(actual string) error {
+	var done <-chan error
+	var stopDesktop func()
+	err := server.ListenAndServeUntil(*addr, h, func(actual string) error {
 		pageURL := "http://" + actual
 		log.Printf("Интерфейс: %s", pageURL)
 		// Если сервер слушает не только локальный адрес, подскажем адреса
@@ -51,12 +53,20 @@ func main() {
 			}
 		}
 		if !*noBrowser {
-			openBrowser(pageURL)
+			var err error
+			done, stopDesktop, err = openDesktop(pageURL)
+			if err != nil {
+				return err
+			}
 		}
 		return nil
-	})
+	}, func() <-chan error { return done })
+	if stopDesktop != nil {
+		stopDesktop()
+	}
 	if err != nil {
-		log.Fatalf("%v", err)
+		showStartupError(err)
+		log.Printf("%v", err)
 	}
 }
 

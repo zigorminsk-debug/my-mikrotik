@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"strconv"
 	"sync"
 
@@ -21,8 +22,10 @@ import (
 var version = "dev"
 
 var (
-	mu      sync.Mutex
-	started bool
+	mu             sync.Mutex
+	started        bool
+	activeServer   *http.Server
+	activeListener net.Listener
 )
 
 // Start запускает локальный HTTP-сервер на 127.0.0.1:port.
@@ -46,29 +49,28 @@ func StartOn(addr string) (string, error) {
 		return "", nil
 	}
 	h := server.NewMux(server.Options{Version: version, WebRoot: web.Content()})
-
-	actual := make(chan string, 1)
-	ready := make(chan error, 1)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return "", fmt.Errorf("не удалось запустить сервер: %w", err)
+	}
+	srv := &http.Server{Handler: h}
+	a := ln.Addr().String()
+	activeServer = srv
+	activeListener = ln
+	started = true
 	go func() {
-		err := server.ListenAndServe(addr, h, func(a string) error {
-			actual <- a
-			ready <- nil
-			return nil
-		})
-		if err != nil {
-			select {
-			case ready <- err:
-			default:
-			}
+		err := srv.Serve(ln)
+		mu.Lock()
+		if activeServer == srv {
+			started = false
+			activeServer = nil
+			activeListener = nil
+		}
+		mu.Unlock()
+		if err != nil && err != http.ErrServerClosed {
 			log.Printf("сервер остановлен: %v", err)
 		}
 	}()
-
-	if err := <-ready; err != nil {
-		return "", fmt.Errorf("не удалось запустить сервер: %w", err)
-	}
-	a := <-actual
-	started = true
 	url := "http://" + a + "/"
 	if host, _, err := net.SplitHostPort(a); err == nil && (host == "0.0.0.0" || host == "::") {
 		url = "http://" + net.JoinHostPort("127.0.0.1", portOf(a)) + "/"
@@ -85,10 +87,18 @@ func portOf(addr string) string {
 	return port
 }
 
-// Stop освобождает признак запуска (для повторного старта после сбоя).
+// Stop останавливает HTTP-сервер и освобождает порт.
 func Stop() {
 	mu.Lock()
 	defer mu.Unlock()
+	if activeServer != nil {
+		_ = activeServer.Close()
+		activeServer = nil
+	}
+	if activeListener != nil {
+		_ = activeListener.Close()
+		activeListener = nil
+	}
 	started = false
 }
 

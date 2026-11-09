@@ -12,6 +12,8 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.Button;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.util.Log;
 
@@ -34,6 +36,7 @@ public class MainActivity extends Activity {
 
     private WebView webView;
     private TextView status;
+    private UpdateChecker updates;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -57,7 +60,15 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        setContentView(root);
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        Button updateButton = new Button(this);
+        updateButton.setText("Проверить обновления");
+        layout.addView(updateButton, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        layout.addView(root, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        setContentView(layout);
+        updates = new UpdateChecker(this);
+        updateButton.setOnClickListener(v -> updates.check(true));
         configureWebView();
 
         // Go-сервер запускается в фоновом потоке: gomobile-вызовы нельзя
@@ -73,6 +84,7 @@ public class MainActivity extends Activity {
         Log.i(TAG, "Интерфейс: " + url);
         status.setVisibility(android.view.View.GONE);
         webView.loadUrl(url);
+        updates.autoCheck();
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -93,7 +105,7 @@ public class MainActivity extends Activity {
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 // Всё, что не наш локальный сервер, открываем во внешнем браузере.
                 Uri uri = request.getUrl();
-                if (uri.getHost() != null && uri.getHost().startsWith("127.0.0.1")) {
+                if (uri.getHost() != null && uri.getHost().equals("127.0.0.1") && uri.getPort() == PORT) {
                     return false;
                 }
                 try {
@@ -117,11 +129,18 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        if (updates != null) updates.onResume();
+    }
+
+    @Override
     protected void onDestroy() {
         if (webView != null) {
             webView.destroy();
             webView = null;
         }
+        if (isFinishing()) Bridge.stop();
         super.onDestroy();
     }
 }

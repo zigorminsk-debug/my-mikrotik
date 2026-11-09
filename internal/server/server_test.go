@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zigorminsk-debug/my-mikrotik/web"
 )
@@ -197,5 +198,34 @@ func TestLocalURLs(t *testing.T) {
 		if !strings.HasPrefix(u, "http://") || !strings.HasSuffix(u, ":8765") {
 			t.Errorf("адрес %q", u)
 		}
+	}
+}
+
+func TestListenAndServeUntilWindowCloses(t *testing.T) {
+	done := make(chan error, 1)
+	addr := make(chan string, 1)
+	finished := make(chan error, 1)
+	go func() {
+		finished <- ListenAndServeUntil("127.0.0.1:0", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }), func(a string) error { addr <- a; return nil }, func() <-chan error { return done })
+	}()
+	a := <-addr
+	resp, err := http.Get("http://" + a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	done <- nil
+	select {
+	case err := <-finished:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not stop")
+	}
+	client := &http.Client{Timeout: time.Second}
+	if resp, err := client.Get("http://" + a); err == nil {
+		resp.Body.Close()
+		t.Fatal("server still listening")
 	}
 }
