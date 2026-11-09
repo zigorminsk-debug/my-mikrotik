@@ -486,6 +486,44 @@
             </div>
           </div>
 
+          <div class="menu-group">
+            <div class="menu-title">Интернет → WAN</div>
+            <div class="sec" data-feat="wan">
+              <label class="sec-head" for="chk-wan">
+                <input type="checkbox" id="chk-wan"><span class="sec-title">Основной и резервный IPv4-каналы</span>
+                <span class="lock" hidden></span>
+              </label>
+              <div class="sec-body">
+                <p>Один или два канала DHCP / статический IPv4. Меньшая distance — основной канал.
+                Для PPPoE пока используется отдельный раздел. VLAN провайдера нужно создать заранее.</p>
+                <div id="wan-links"></div>
+                <button type="button" class="ghost" id="wan-add">Добавить WAN-канал</button>
+                <p>DHCP: резервирование при потере lease/link. Ping статического шлюза НЕ проверяет интернет за ним.
+                Существующие DHCP-клиенты и маршруты могут конфликтовать: проверьте конфигурацию перед применением.
+                Настройки DNS задаются отдельно. Снятие галочки не удаляет ранее применённые настройки.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="menu-group">
+            <div class="menu-title">IP → Firewall → NAT</div>
+            <div class="sec" data-feat="portForward">
+              <label class="sec-head" for="chk-portForward">
+                <input type="checkbox" id="chk-portForward">
+                <span class="sec-title">Проброс портов и Hairpin NAT</span>
+                <span class="lock" hidden></span>
+              </label>
+              <div class="sec-body">
+                <p>Каждое правило открывает доступ к локальному сервису. Без ограничения источника — для всего интернета.
+                Проверьте порядок NAT и разрешение dstnat в цепочке forward: firewall автоматически не меняется.</p>
+                <div id="forward-rules"></div>
+                <button type="button" class="ghost" id="forward-add">Добавить правило</button>
+                <p>Hairpin требует фиксированный внешний IPv4 и подсеть LAN. Для динамического IP используйте внутренний DNS.
+                Повторное применение заменяет только правила mti-forward-*. Снятие галочки не удаляет настройки с роутера.</p>
+              </div>
+            </div>
+          </div>
+
           <div class="actions">
             <button type="button" class="ghost" id="refresh">Обновить данные устройства</button>
           </div>
@@ -549,7 +587,7 @@
     ["uptime", "Аптайм"]
   ];
 
-  var FEATURES = ["lan", "dhcp", "dns", "ntp", "pppoe", "wifi"];
+  var FEATURES = ["lan", "dhcp", "dns", "ntp", "pppoe", "wifi", "portForward", "wan"];
   var DEFAULT_ON = ["lan", "dhcp"];
   var DEFAULTS = { "dns-remote": true, "pppoe-route": true, "pppoe-dns": true, "pppoe-nat": true };
 
@@ -804,6 +842,68 @@
     });
   }
 
+  $("wan-add").addEventListener("click", function () {
+    var count = $("wan-links").children.length;
+    if (count >= 2) return;
+    var row = document.createElement("fieldset");
+    var legend = document.createElement("legend"); legend.textContent = "WAN-канал"; row.appendChild(legend);
+    var grid = document.createElement("div"); grid.className = "grid";
+    [["iface", "Интерфейс (например ether1)", "text"], ["mode", "Подключение", "select"],
+     ["address", "Статический IPv4/CIDR", "text"], ["gateway", "Шлюз статического канала", "text"],
+     ["distance", "Приоритет: меньше — основной (1–254)", "number"],
+     ["nat", "NAT masquerade", "checkbox"], ["checkGateway", "Ping шлюза (только static)", "checkbox"]].forEach(function (spec) {
+      var label = document.createElement("label"); label.className = "field"; label.textContent = spec[1];
+      var input = document.createElement(spec[2] === "select" ? "select" : "input");
+      if (spec[2] === "select") ["dhcp", "static"].forEach(function (v) {
+        var o = document.createElement("option"); o.value = v; o.textContent = v.toUpperCase(); input.appendChild(o);
+      }); else input.type = spec[2];
+      input.dataset.key = spec[0];
+      if (spec[0] === "distance") { input.min = "1"; input.max = "254"; input.value = count ? "2" : "1"; }
+      if (spec[0] === "nat") input.checked = true;
+      label.appendChild(input); grid.appendChild(label);
+    });
+    row.appendChild(grid);
+    function updateMode() {
+      var dhcp = row.querySelector('[data-key="mode"]').value === "dhcp";
+      ["address", "gateway", "checkGateway"].forEach(function (key) {
+        var el = row.querySelector('[data-key="' + key + '"]'); el.disabled = dhcp;
+        if (dhcp && key === "checkGateway") el.checked = false;
+      });
+    }
+    row.querySelector('[data-key="mode"]').addEventListener("change", updateMode); updateMode();
+    var remove = document.createElement("button"); remove.type = "button"; remove.className = "ghost"; remove.textContent = "Удалить канал";
+    remove.addEventListener("click", function () { row.remove(); schedulePreview(); }); row.appendChild(remove);
+    row.addEventListener("input", schedulePreview); row.addEventListener("change", schedulePreview);
+    $("wan-links").appendChild(row); schedulePreview();
+  });
+
+  $("forward-add").addEventListener("click", function () {
+    if ($("forward-rules").children.length >= 64) return;
+    var row = document.createElement("fieldset");
+    var legend = document.createElement("legend"); legend.textContent = "Правило проброса"; row.appendChild(legend);
+    var grid = document.createElement("div"); grid.className = "grid";
+    [["wan", "WAN-интерфейс (например pppoe-out1)", "text"],
+     ["protocol", "Протокол", "select"], ["externalPort", "Внешний порт", "number"],
+     ["internalIP", "Локальный IPv4 сервера", "text"], ["internalPort", "Порт сервера", "number"],
+     ["publicIP", "Внешний IPv4 (необязательно)", "text"],
+     ["source", "Разрешённый источник IPv4/CIDR (пусто = все)", "text"],
+     ["hairpin", "Hairpin: доступ из LAN по внешнему IP", "checkbox"],
+     ["lan", "Подсеть hairpin, например 192.168.88.0/24", "text"]].forEach(function (spec) {
+      var label = document.createElement("label"); label.className = "field"; label.textContent = spec[1];
+      var input = document.createElement(spec[2] === "select" ? "select" : "input");
+      if (spec[2] === "select") ["tcp", "udp"].forEach(function (v) {
+        var o = document.createElement("option"); o.value = v; o.textContent = v.toUpperCase(); input.appendChild(o);
+      }); else input.type = spec[2];
+      if (spec[2] === "number") { input.min = "1"; input.max = "65535"; }
+      input.dataset.key = spec[0]; label.appendChild(input); grid.appendChild(label);
+    });
+    row.appendChild(grid);
+    var remove = document.createElement("button"); remove.type = "button"; remove.className = "ghost"; remove.textContent = "Удалить правило";
+    remove.addEventListener("click", function () { row.remove(); schedulePreview(); }); row.appendChild(remove);
+    row.addEventListener("input", schedulePreview); row.addEventListener("change", schedulePreview);
+    $("forward-rules").appendChild(row); schedulePreview();
+  });
+
   // ------------------------------------------------------------------
   // сбор настроек
   // ------------------------------------------------------------------
@@ -812,6 +912,20 @@
 
   function collect() {
     return {
+      wan: { enabled: chk("chk-wan"), links: Array.from($("wan-links").children).map(function (row) {
+        var link = {};
+        row.querySelectorAll("[data-key]").forEach(function (el) {
+          link[el.dataset.key] = el.type === "checkbox" ? el.checked : el.type === "number" ? Number(el.value) : el.value.trim();
+        });
+        return link;
+      }) },
+      portForward: { enabled: chk("chk-portForward"), rules: Array.from($("forward-rules").children).map(function (row) {
+        var rule = {};
+        row.querySelectorAll("[data-key]").forEach(function (el) {
+          rule[el.dataset.key] = el.type === "checkbox" ? el.checked : el.value.trim();
+        });
+        return rule;
+      }) },
       lan: { enabled: chk("chk-lan"), iface: val("lan-iface"), address: val("lan-addr") },
       dhcp: {
         enabled: chk("chk-dhcp"), iface: val("dhcp-iface"),

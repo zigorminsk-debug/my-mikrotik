@@ -67,12 +67,14 @@ type WiFiSettings struct {
 
 // Settings — все настройки конструктора.
 type Settings struct {
-	LAN   LanSettings   `json:"lan"`
-	DHCP  DHCPSettings  `json:"dhcp"`
-	DNS   DNSSettings   `json:"dns"`
-	NTP   NTPSettings   `json:"ntp"`
-	PPPoE PPPoESettings `json:"pppoe"`
-	WiFi  WiFiSettings  `json:"wifi"`
+	WAN         WANSettings         `json:"wan"`
+	PortForward PortForwardSettings `json:"portForward"`
+	LAN         LanSettings         `json:"lan"`
+	DHCP        DHCPSettings        `json:"dhcp"`
+	DNS         DNSSettings         `json:"dns"`
+	NTP         NTPSettings         `json:"ntp"`
+	PPPoE       PPPoESettings       `json:"pppoe"`
+	WiFi        WiFiSettings        `json:"wifi"`
 }
 
 // ConfigRequest — запрос на генерацию конфигурации.
@@ -203,6 +205,8 @@ func AnalyzeFeatures(device *Info, ifaces []Iface) []FeatureInfo {
 	wifiIface := hasAnyIface(ifaces, IsWiFiIface)
 
 	features := []FeatureInfo{
+		{ID: "wan", Title: "Интернет и резервный канал", Path: "/ip route", Package: "system/dhcp", Available: has("system") && has("dhcp"), Reason: reasonIf(!has("system") || !has("dhcp"), "system/dhcp")},
+		{ID: "portForward", Title: "Проброс портов", Path: "/ip firewall nat", Package: "system", Available: has("system") || device == nil, Reason: reasonIf(!has("system") && device != nil, "system")},
 		{ID: featLAN, Title: "Адреса и подсеть", Path: "/ip address",
 			Package: "system", Available: has("system") || device == nil,
 			Reason: reasonIf(!has("system") && device != nil, "system")},
@@ -416,7 +420,7 @@ func rosQuote(v string) string {
 	b.WriteByte('"')
 	for _, r := range v {
 		switch r {
-		case '"', '\\':
+		case '"', '\\', '$':
 			b.WriteByte('\\')
 			b.WriteRune(r)
 		case '\n':
@@ -549,6 +553,13 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 
 	res := &ConfigResult{OK: true, Features: features}
 	var errs []string
+	if s.WAN.Enabled && avail["wan"] {
+		errs = append(errs, validateWAN(s.WAN, s.PPPoE)...)
+		errs = append(errs, validateWANLocal(s.WAN, s.LAN)...)
+	}
+	if s.PortForward.Enabled && avail["portForward"] {
+		errs = append(errs, validatePortForward(s.PortForward)...)
+	}
 
 	// --- вычисления ---
 	var (
@@ -678,6 +689,10 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 	for _, f := range features {
 		enabled := false
 		switch f.ID {
+		case "wan":
+			enabled = s.WAN.Enabled
+		case "portForward":
+			enabled = s.PortForward.Enabled
 		case featLAN:
 			enabled = s.LAN.Enabled
 		case featDHCP:
@@ -863,6 +878,16 @@ func buildScript(device *Info, s *Settings, now time.Time, avail map[string]bool
 				rosQuote(strings.TrimSpace(s.WiFi.Country)),
 				attr("passphrase", s.WiFi.Passphrase))
 		}
+	}
+
+	if s.PortForward.Enabled && avail["portForward"] {
+		anyOn = true
+		buildPortForward(&b, s.PortForward)
+	}
+
+	if s.WAN.Enabled && avail["wan"] {
+		anyOn = true
+		buildWAN(&b, s.WAN)
 	}
 
 	if !anyOn {
