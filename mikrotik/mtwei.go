@@ -168,13 +168,15 @@ func ecFromMont(montX *big.Int, parity byte) (*ecPoint, bool) {
 func ecTangle(target *ecPoint, validator []byte, negate bool) (*ecPoint, *big.Int) {
 	v := new(big.Int).SetBytes(validator)
 	vpt := ecMul(v, ecG)
-	edpx := new(big.Int).SetBytes(sha256.Sum256(montXBytes(vpt))[:])
+	h0 := sha256.Sum256(montXBytes(vpt))
+	edpx := new(big.Int).SetBytes(h0[:])
 	parity := byte(0)
 	if negate {
 		parity = 1
 	}
 	for {
-		edpxm := new(big.Int).SetBytes(sha256.Sum256(pad32(edpx))[:])
+		h1 := sha256.Sum256(pad32(edpx))
+		edpxm := new(big.Int).SetBytes(h1[:])
 		if pt, ok := ecFromMont(edpxm, parity); ok {
 			vpt = pt
 			break
