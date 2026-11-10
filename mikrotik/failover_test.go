@@ -22,7 +22,10 @@ func TestFailoverGeneration(t *testing.T) {
 		if !res.OK {
 			t.Fatal(res.Error)
 		}
-		for _, want := range []string{"routing-table=mti-probe", "blackhole", "chain=output protocol=icmp dst-address=8.8.4.4", "new-routing-mark=mti-probe", `\$now - \$mtiFailBad >= 30s`, `\$now - \$mtiFailGood >= 1m`, "interval=5s", "default-route-distance="} {
+		// Перенос правила в начало цепочки не должен ронять весь скрипт.
+		for _, want := range []string{"routing-table=mti-probe", "blackhole", "chain=output protocol=icmp dst-address=8.8.4.4", "new-routing-mark=mti-probe", `\$now - \$mtiFailBad >= 30s`, `\$now - \$mtiFailGood >= 1m`, "interval=5s", "default-route-distance=",
+			":do { /ip firewall mangle move [find comment=mti-probe] 0 } on-error={",
+		} {
 			if !strings.Contains(res.Script, want) {
 				t.Errorf("%s missing %s", mode, want)
 			}

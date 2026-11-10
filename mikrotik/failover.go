@@ -22,7 +22,12 @@ func buildFailover(b *strings.Builder, s WANSettings) {
 	b.WriteString(":if ([:len [/routing table find name=mti-probe]] = 0) do={ /routing table add name=mti-probe fib }\n")
 	b.WriteString("/ip firewall mangle remove [find comment=mti-probe]\n/ip route remove [find comment=mti-probe]\n")
 	b.WriteString("/ip route add blackhole dst-address=0.0.0.0/0 routing-table=mti-probe distance=254 comment=mti-probe\n")
-	fmt.Fprintf(b, "/ip firewall mangle add chain=output protocol=icmp %s action=mark-routing new-routing-mark=mti-probe passthrough=no comment=mti-probe\n/ip firewall mangle move [find comment=mti-probe] 0\n", attr("dst-address", target))
+	fmt.Fprintf(b, "/ip firewall mangle add chain=output protocol=icmp %s action=mark-routing new-routing-mark=mti-probe passthrough=no comment=mti-probe\n", attr("dst-address", target))
+	// Порядок правила желателен, но не обязателен: если первым в цепочке стоит
+	// встроенное правило, RouterOS не даёт поднять наше выше него
+	// («cannot move builtin»). Такая ошибка не должна ронять весь скрипт —
+	// иначе применение падает целиком из-за несущественной детали.
+	b.WriteString(":do { /ip firewall mangle move [find comment=mti-probe] 0 } on-error={ :log warning \"mti: правило mti-probe оставлено на месте — выше него встроенное правило\" }\n")
 	var code strings.Builder
 	code.WriteString(":global mtiFailBad; :global mtiFailGood; :global mtiFailBackup;\n:local now [/system resource get uptime];\n:local gw \"\";\n")
 	switch primary.Mode {
