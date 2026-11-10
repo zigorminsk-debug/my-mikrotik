@@ -146,10 +146,10 @@ func parseCtrlBlocks(payload []byte) []ctrlBlock {
 // запросы роутера (DSR/DECID), без чего RouterOS считает терминал 1x1 и ломает
 // вывод. Возвращает очищенный текст (escape-последовательности вырезаны).
 type vt100Tracker struct {
-	row, col       int
-	width, height  int
-	state          int // 0 — текст, 1 — после ESC, 2 — внутри CSI
-	csi            []byte
+	row, col      int
+	width, height int
+	state         int // 0 — текст, 1 — после ESC, 2 — внутри CSI
+	csi           []byte
 }
 
 func newVT100Tracker(width, height int) *vt100Tracker {
@@ -305,7 +305,7 @@ type macSession struct {
 	remoteMAC  net.HardwareAddr
 	sessionKey uint16
 
-	mu        sync.Mutex
+	mu         sync.Mutex
 	outCounter uint32
 	inCounter  int64
 	lastAck    uint32
@@ -806,5 +806,3 @@ func loginBaseName(user string) string {
 	}
 	return user
 }
-
-
