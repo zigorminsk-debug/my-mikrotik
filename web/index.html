@@ -260,6 +260,7 @@
         <div class="row">
           <label class="checkbox"><input type="checkbox" id="tls"> TLS / HTTPS</label>
           <button type="submit" id="go">Подключиться</button>
+          <button type="button" class="ghost" id="connect-default">Подключиться к новому MikroTik</button>
           <button type="button" class="ghost" id="copy" style="display:none">Скопировать отчёт</button>
         </div>
         <div class="hint">
@@ -267,6 +268,11 @@
           REST API — <code>80</code> (с TLS — <code>443</code>). Рекомендуется включить
           в RouterOS <code>/ip service</code> api/rest и входить под администратором.
           Данные подключения используются и для применения конфигурации.
+          Кнопка «Подключиться к новому MikroTik» использует <code>192.168.88.1</code>,
+          <code>admin</code>, пустой пароль, автоматический выбор API/REST и порты по умолчанию без TLS.
+          Подключите компьютер к LAN-порту и убедитесь, что API или REST включён.
+          На некоторых моделях пароль указан на наклейке; при сбросе без заводской конфигурации
+          адрес и сервисы могут отсутствовать. В этих случаях введите свои данные или используйте WinBox.
         </div>
       </form>
     </section>
@@ -1127,6 +1133,7 @@
   // подключение и загрузка данных
   // ------------------------------------------------------------------
   function loadInterfaces() {
+    var device = lastInfo;
     var payload = connPayload();
     payload.device = lastInfo;
     return fetch("/api/interfaces", {
@@ -1136,12 +1143,14 @@
     })
       .then(function (r) { return r.json(); })
       .then(function (res) {
+        if (lastInfo !== device) return;
         if (!res.ok) throw new Error(res.error || "не удалось прочитать интерфейсы");
         applyInterfaces(res.interfaces || []);
         applyFeatures(res.features);
         if (res.features) preview();
       })
       .catch(function (e) {
+        if (lastInfo !== device) return;
         $("devline").textContent = "интерфейсы не прочитаны: " + (e.message || e);
       });
   }
@@ -1164,10 +1173,36 @@
     loadInterfaces();
   }
 
+  $("connect-default").addEventListener("click", function () {
+    if ($("go").disabled) return;
+    $("host").value = "192.168.88.1";
+    $("port").value = "";
+    $("user").value = "admin";
+    $("password").value = "";
+    $("protocol").value = "auto";
+    $("tls").checked = false;
+    // Обычная отправка формы сохраняет настройки и проходит тот же путь подключения.
+    $("go").click();
+  });
+
   $("connform").addEventListener("submit", function (ev) {
     ev.preventDefault();
     var btn = $("go");
+    if (btn.disabled) return;
+    // Старый скрипт не должен применяться к другому устройству после неудачного входа.
+    lastInfo = null;
+    lastIfaces = [];
+    currentScript = "";
+    clearTimeout(previewTimer);
+    previewSeq++;
+    setActions(false);
+    $("build-body").style.display = "none";
+    $("build-need-conn").style.display = "";
+    $("result").classList.remove("show");
+    $("copy").style.display = "none";
+    hideStatus();
     btn.disabled = true;
+    $("connect-default").disabled = true;
     btn.innerHTML = '<span class="spinner"></span>Читаем данные…';
     savePrefs();
 
@@ -1187,6 +1222,7 @@
       .catch(function (e) { showError(e.message || String(e)); })
       .finally(function () {
         btn.disabled = false;
+        $("connect-default").disabled = false;
         btn.textContent = "Подключиться";
       });
   });
