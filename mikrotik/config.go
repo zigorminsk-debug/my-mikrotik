@@ -745,7 +745,11 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 	}
 
 	if s.Backup.Enabled && avail["backup"] {
-		errs = append(errs, validateBackup(s.Backup)...)
+		rosVersion := ""
+		if device != nil {
+			rosVersion = device.RouterOS
+		}
+		errs = append(errs, validateBackup(s.Backup, rosVersion)...)
 	}
 	if s.GeoNAT.Enabled && avail["geoNat"] {
 		errs = append(errs, validateGeoNAT(s.GeoNAT, ifaces, s)...)
@@ -874,7 +878,7 @@ func buildScript(device *Info, s *Settings, now time.Time, avail map[string]bool
 	anyOn := false
 	if s.Backup.Enabled && avail["backup"] {
 		anyOn = true
-		writeBackup(&b, s.Backup)
+		writeBackup(&b, s.Backup, rosVer)
 	}
 
 	if s.LAN.Enabled && avail[featLAN] {
