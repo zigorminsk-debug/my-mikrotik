@@ -67,6 +67,7 @@ type WiFiSettings struct {
 
 // Settings — все настройки конструктора.
 type Settings struct {
+	Backup           BackupSettings          `json:"backup"`
 	GeoNAT           GeoNATSettings          `json:"geoNat"`
 	Security         SecuritySettings        `json:"security"`
 	LAN              LanSettings             `json:"lan"`
@@ -210,6 +211,7 @@ func AnalyzeFeatures(device *Info, ifaces []Iface) []FeatureInfo {
 	wifiIface := hasAnyIface(ifaces, IsWiFiIface)
 
 	features := []FeatureInfo{
+		{ID: "backup", Title: "Бэкап по расписанию", Path: "/system scheduler", Package: "system", Available: has("system"), Reason: reasonIf(!has("system"), "system")},
 		{ID: "geoNat", Title: "Белый список для dst-nat", Path: "/ip firewall filter", Package: "system", Available: has("system"), Reason: reasonIf(!has("system"), "system")},
 		{ID: "security", Title: "Защита WAN и WinBox", Path: "/ip firewall filter", Package: "system", Available: has("system"), Reason: reasonIf(!has("system"), "system")},
 		{ID: featLAN, Title: "Адреса и подсеть", Path: "/ip address",
@@ -727,6 +729,9 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 		}
 	}
 
+	if s.Backup.Enabled && avail["backup"] {
+		errs = append(errs, validateBackup(s.Backup)...)
+	}
 	if s.GeoNAT.Enabled && avail["geoNat"] {
 		errs = append(errs, validateGeoNAT(s.GeoNAT, ifaces, s)...)
 	}
@@ -765,6 +770,8 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 			enabled = s.PPPoE.Enabled
 		case featWiFi:
 			enabled = s.WiFi.Enabled
+		case "backup":
+			enabled = s.Backup.Enabled
 		case "geoNat":
 			enabled = s.GeoNAT.Enabled
 		case "security":
@@ -846,6 +853,10 @@ func buildScript(device *Info, s *Settings, now time.Time, avail map[string]bool
 	fmt.Fprintf(&b, "# ================================================================\n")
 
 	anyOn := false
+	if s.Backup.Enabled && avail["backup"] {
+		anyOn = true
+		writeBackup(&b, s.Backup)
+	}
 
 	if s.LAN.Enabled && avail[featLAN] {
 		anyOn = true
