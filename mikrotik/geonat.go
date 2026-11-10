@@ -93,7 +93,7 @@ func natAddresses(s GeoNATSettings) ([]string, error) {
 
 func validateGeoNAT(s GeoNATSettings, ifaces []Iface, settings *Settings) []string {
 	var errs []string
-	if settings.Security.Enabled || settings.LAN.Enabled || settings.DHCP.Enabled || settings.DNS.Enabled || settings.NTP.Enabled || settings.PPPoE.Enabled || settings.WiFi.Enabled || settings.WGServer.Enabled || settings.WGClient.Enabled || settings.OpenVPN.Enabled || settings.PPTP.Enabled || settings.OVPNCertificates.Enabled {
+	if settings.Backup.Enabled || settings.Security.Enabled || settings.LAN.Enabled || settings.DHCP.Enabled || settings.DNS.Enabled || settings.NTP.Enabled || settings.PPPoE.Enabled || settings.WiFi.Enabled || settings.WGServer.Enabled || settings.WGClient.Enabled || settings.OpenVPN.Enabled || settings.PPTP.Enabled || settings.OVPNCertificates.Enabled {
 		errs = append(errs, "Белый список NAT: выключите остальные разделы и применяйте отдельным скриптом")
 	}
 	if !s.Acknowledged {

@@ -52,6 +52,7 @@ func NewMux(opt Options) http.Handler {
 		_, _ = w.Write([]byte(ManifestJSON))
 	})
 
+	mux.HandleFunc("/api/discovery", handleDiscovery)
 	mux.HandleFunc("/api/info", handleInfo(ver))
 	mux.HandleFunc("/api/interfaces", handleInterfaces(ver))
 	mux.HandleFunc("/api/config", handleConfig)
