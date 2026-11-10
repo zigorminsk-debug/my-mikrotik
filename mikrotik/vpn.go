@@ -63,6 +63,7 @@ func validCIDRs(s string) bool {
 func validHost(s string) bool {
 	return net.ParseIP(s) != nil || (len(s) <= 253 && hostRe.MatchString(s))
 }
+
 // wgStep возвращает шаг настройки WireGuard. Шаг 1 поднимает интерфейс
 // (приватный ключ генерирует сам RouterOS), шаг 2 добавляет peer.
 func wgStep(w WireGuardSettings) string {
@@ -112,6 +113,7 @@ func validateVPNClient(v VPNClientSettings, label string, ovpn bool) []string {
 	}
 	return e
 }
+
 // writeWG пишет скрипт текущего шага настройки WireGuard: шаг 1 поднимает
 // интерфейс (ключи генерирует RouterOS), шаг 2 добавляет peer.
 func writeWG(b *strings.Builder, w WireGuardSettings, client bool) {
