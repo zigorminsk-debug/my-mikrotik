@@ -49,6 +49,9 @@ func CollectInterfaces(ctx context.Context, p Params) ([]Iface, error) {
 	if err := p.normalize(); err != nil {
 		return nil, err
 	}
+	if p.Protocol == "mac" {
+		return interfacesMAC(ctx, &p)
+	}
 	var protocols []string
 	switch p.Protocol {
 	case "api":

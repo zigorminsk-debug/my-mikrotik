@@ -31,6 +31,13 @@ func ApplyScript(ctx context.Context, p Params, source string) (string, error) {
 		return "", fmt.Errorf("скрипт слишком большой (%d ББ, максимум %d)", len(source), maxScriptSize)
 	}
 
+	if p.Protocol == "mac" {
+		if err := applyMAC(ctx, &p, source); err != nil {
+			return "", err
+		}
+		return "mac", nil
+	}
+
 	var protocols []string
 	switch p.Protocol {
 	case "api":
