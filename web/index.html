@@ -545,7 +545,7 @@
                 <label class="field">Пароль шифрования backup (необязательно)<input id="backup-password" type="password" autocomplete="new-password"></label>
                 <label class="field">Время роутера<input id="backup-time" type="time" value="02:00"></label>
                 <label class="field">Период<select id="backup-interval"><option value="1d">Каждый день</option><option value="1w">Каждую неделю</option></select></label>
-              </div><div class="sec-note">SMTP-сервер, порт, логин и пароль скрипт передаёт самой команде отправки, поэтому настраивать <span class="mono">/tool e-mail</span> на роутере не нужно: именно из-за ненастроенного <span class="mono">/tool e-mail</span> письма чаще всего и не уходят — команда просто падает без следа в журнале. Имя сервера разбирается командой <span class="mono">:resolve</span>, поэтому на роутере должен работать DNS (или укажите IP сразу). Логин SMTP обычно — полный адрес почты (как в поле «Отправитель»): часть серверов отклоняет вход и отправку, если логин или отправитель не совпадают с ящиком. Для Gmail, Яндекса и Mail.ru используйте пароль приложения. Установите точное время и часовой пояс, иначе планировщик сработает не тогда, когда вы ждёте. Каждый шаг пишется в журнал роутера — <span class="mono">/log print where message~"mti"</span>: по нему видно, создался ли файл и ушло ли письмо. Пароль SMTP и пароль шифрования видны в тексте скрипта: ограничьте доступ к роутеру и не публикуйте скрипт. Файл <span class="mono">mti-scheduled.backup</span> остаётся на роутере и перед следующим запуском удаляется, в том числе при неудаче; храните независимые копии. Доставка письма не гарантируется. Повторное применение заменяет задания mti-backup. Проверяйте восстановление на совместимом устройстве.</div></div></div></div>
+              </div><div class="sec-note">SMTP-сервер, порт, логин и пароль скрипт передаёт самой команде отправки, поэтому настраивать <span class="mono">/tool e-mail</span> на роутере не нужно: именно из-за ненастроенного <span class="mono">/tool e-mail</span> письма чаще всего и не уходят — команда просто падает без следа в журнале. Имя сервера разбирается командой <span class="mono">:resolve</span>, поэтому на роутере должен работать DNS (или укажите IP сразу). Логин SMTP обычно — полный адрес почты (как в поле «Отправитель»): часть серверов отклоняет вход и отправку, если логин или отправитель не совпадают с ящиком. Для Gmail, Яндекса и Mail.ru используйте пароль приложения. Установите точное время и часовой пояс, иначе планировщик сработает не тогда, когда вы ждёте. Каждый шаг пишется в журнал роутера — <span class="mono">/log print where message~"mti"</span>: по нему видно, создался ли файл и ушло ли письмо. Пароль SMTP и пароль шифрования видны в тексте скрипта: ограничьте доступ к роутеру и не публикуйте скрипт. Файл <span class="mono">mti-scheduled.backup</span> остаётся на роутере и перед следующим запуском удаляется, в том числе при неудаче; храните независимые копии. Доставка письма не гарантируется. Повторное применение заменяет задания mti-backup. Проверяйте восстановление на совместимом устройстве.</div><div class="actions"><button type="button" class="ghost" id="backup-log">Показать журнал роутера (mti)</button></div><pre class="mono" id="backup-log-out" hidden style="white-space:pre-wrap;word-break:break-word;max-height:16rem;overflow:auto;background:var(--panel-2,#f6f7f9);border:1px solid var(--border,#d8dce3);border-radius:8px;padding:.6rem .7rem;margin:.5rem 0 0;font-size:.78rem"></pre></div></div></div>
           <div class="menu-group"><div class="menu-title">VPN</div>
 <div class="sec" data-feat="wgServer"><label class="sec-head" for="chk-wgServer"><input type="checkbox" id="chk-wgServer"><span class="sec-title">WireGuard — MikroTik сервер</span><span class="sec-path mono">/interface wireguard</span><span class="lock" hidden></span></label><div class="sec-body"><div class="grid"><label class="field">Шаг настройки<select id="wgServer-step"><option value="interface">Шаг 1 — поднять интерфейс (ключ создаст роутер)</option><option value="peer">Шаг 2 — добавить peer</option></select></label><label class="field">Публичный ключ другой стороны<input id="wgServer-publicKey" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">Адрес интерфейса с маской<input id="wgServer-address" type="text" value="10.10.10.1/24" autocomplete="off" spellcheck="false"></label><label class="field">Allowed Address: сети другой стороны (CIDR)<input id="wgServer-allowedIPs" type="text" value="10.10.10.2/32" autocomplete="off" spellcheck="false"></label><label class="field">Локальный UDP-порт<input id="wgServer-listenPort" type="number" min="1" max="65535" value="13231" autocomplete="off" spellcheck="false"></label></div><div class="sec-note">WireGuard использует только UDP. Приватный ключ создаёт сам роутер: на <b>шаге 1</b> интерфейс поднимается и получает адрес, а его публичный ключ выводится скриптом и сохраняется в комментарии интерфейса — он появится ниже после обновления данных. Передайте этот ключ другой стороне, затем переключитесь на <b>шаг 2</b> и укажите публичный ключ другой стороны, адрес сервера и сети туннеля. На сервере разрешите входящий UDP-порт; маршруты и firewall на обеих сторонах настройте отдельно. Создаётся один peer.</div><div class="sec-note mono" id="wgServer-pubkey"></div></div></div>
 <div class="sec" data-feat="wgClient"><label class="sec-head" for="chk-wgClient"><input type="checkbox" id="chk-wgClient"><span class="sec-title">WireGuard — MikroTik клиент</span><span class="sec-path mono">/interface wireguard</span><span class="lock" hidden></span></label><div class="sec-body"><div class="grid"><label class="field">Шаг настройки<select id="wgClient-step"><option value="interface">Шаг 1 — поднять интерфейс (ключ создаст роутер)</option><option value="peer">Шаг 2 — добавить peer</option></select></label><label class="field">Публичный ключ другой стороны<input id="wgClient-publicKey" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">Адрес интерфейса с маской<input id="wgClient-address" type="text" value="10.10.10.2/24" autocomplete="off" spellcheck="false"></label><label class="field">Allowed Address: сети другой стороны (CIDR)<input id="wgClient-allowedIPs" type="text" value="10.10.10.0/24" autocomplete="off" spellcheck="false"></label><label class="field">Локальный UDP-порт<input id="wgClient-listenPort" type="number" min="1" max="65535" value="13231" autocomplete="off" spellcheck="false"></label><label class="field">Адрес сервера<input id="wgClient-endpoint" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">UDP-порт сервера<input id="wgClient-endpointPort" type="number" min="1" max="65535" value="13231" autocomplete="off" spellcheck="false"></label></div><div class="sec-note">WireGuard использует только UDP. Приватный ключ создаёт сам роутер: на <b>шаге 1</b> интерфейс поднимается и получает адрес, а его публичный ключ выводится скриптом и сохраняется в комментарии интерфейса — он появится ниже после обновления данных. Передайте этот ключ серверу, затем переключитесь на <b>шаг 2</b> и укажите публичный ключ сервера, его адрес и порт, а также сети туннеля. Маршруты и firewall настраиваются отдельно. Создаётся один peer.</div><div class="sec-note mono" id="wgClient-pubkey"></div></div></div>
@@ -709,6 +709,43 @@
       $("tls").checked = !!p.tls;
       syncProtocolFromHost();
     } catch (e) {}
+  }
+
+  // Журнал роутера: по нему видно, создался ли файл бэкапа и ушло ли письмо.
+  function showBackupLog() {
+    var btn = $("backup-log");
+    var out = $("backup-log-out");
+    if (!lastInfo) { showError("Сначала подключитесь к роутеру"); return; }
+    btn.disabled = true;
+    btn.textContent = "Читаем журнал…";
+    out.hidden = true;
+    var payload = connPayload();
+    payload.filter = "mti";
+    payload.limit = 200;
+    fetch("/api/log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.error || "не удалось прочитать журнал");
+        var lines = res.log || [];
+        if (!lines.length) {
+          out.textContent = "Записей с «mti» в журнале нет. " +
+            "Запустите задание вручную: /system script run mti-backup-email";
+        } else {
+          out.textContent = lines.map(function (e) {
+            return (e.time ? e.time + "  " : "") + (e.topics ? "[" + e.topics + "] " : "") + (e.message || "");
+          }).join("\n");
+        }
+        out.hidden = false;
+      })
+      .catch(function (e) { showError(e && e.message ? e.message : String(e)); })
+      .finally(function () {
+        btn.disabled = false;
+        btn.textContent = "Показать журнал роутера (mti)";
+      });
   }
 
   function connPayload() {
@@ -1287,6 +1324,7 @@
   });
   ["backup-recipient", "backup-from", "backup-smtpServer", "backup-smtpPort", "backup-smtpUser", "backup-smtpPass", "backup-password", "backup-time", "backup-interval"].forEach(function(id){ $(id).addEventListener("input",schedulePreview); $(id).addEventListener("change",schedulePreview); });
   $("backup-tls").addEventListener("change", schedulePreview);
+  $("backup-log").addEventListener("click", showBackupLog);
   FEATURES.forEach(function (id) {
     var sec = document.querySelector('.sec[data-feat="' + id + '"]');
     var head = sec.querySelector(".sec-head");

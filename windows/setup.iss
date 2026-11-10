@@ -43,3 +43,28 @@ Name: "{autodesktop}\MikroTik Inspector"; Filename: "{app}\MikroTikInspector.exe
 Name: "desktopicon"; Description: "Создать значок на рабочем столе"; Flags: unchecked
 [Run]
 Filename: "{app}\MikroTikInspector.exe"; Description: "Запустить MikroTik Inspector"; Flags: nowait postinstall skipifsilent runascurrentuser
+
+[Code]
+// Программа живёт в области уведомлений и держит свой exe открытым. Пока
+// процесс запущен, установщик не может заменить файл («Доступ запрещён»),
+// поэтому обновление поверх работающей копии падало. Останавливаем процесс
+// до того, как начнём запись файлов.
+procedure StopRunningApp();
+var
+  ResultCode: Integer;
+begin
+  Exec('taskkill.exe', '/IM MikroTikInspector.exe /F /T', '', SW_HIDE,
+    ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+    StopRunningApp();
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+    StopRunningApp();
+end;

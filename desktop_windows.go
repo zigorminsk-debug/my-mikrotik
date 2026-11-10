@@ -168,7 +168,8 @@ func openDesktop(url string) (<-chan error, func(), error) {
 	}
 	if callErr == syscall.Errno(183) {
 		syscall.CloseHandle(syscall.Handle(handle))
-		return nil, nil, fmt.Errorf("MikroTik Inspector уже запущен")
+		return nil, nil, fmt.Errorf("MikroTik Inspector уже запущен — значок программы в области уведомлений. " +
+			"Завершите его через меню значка и запустите программу снова")
 	}
 	release := func() { _ = syscall.CloseHandle(syscall.Handle(handle)) }
 	var edge string
