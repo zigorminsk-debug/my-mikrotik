@@ -606,16 +606,13 @@ func macEqual(a, b net.HardwareAddr) bool {
 // перебирает сетевые интерфейсы, шлёт SESSIONSTART и ведёт аутентификацию.
 func dialMAC(ctx context.Context, targetMAC net.HardwareAddr, user, password string) (*macSession, error) {
 	sessionKey := uint16(0)
-	if b := make([]byte, 2); _, err := rand.Read(b); err == nil {
-		sessionKey = binary.BigEndian.Uint16(b)
-	}
+	kb := make([]byte, 2)
+	_, _ = rand.Read(kb)
+	sessionKey = binary.BigEndian.Uint16(kb)
 	if sessionKey == 0 {
 		sessionKey = 0x4d54
 	}
-	sourcePort := 1024
-	if b := make([]byte, 2); _, err := rand.Read(b); err == nil {
-		sourcePort = 1024 + int(binary.BigEndian.Uint16(b))%1024
-	}
+	sourcePort := 1024 + int(binary.BigEndian.Uint16(kb))%1024
 
 	priv, clientPub, err := ecKeygen()
 	if err != nil {
