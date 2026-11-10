@@ -37,7 +37,9 @@ func main() {
 		return
 	}
 
-	h := server.NewMux(server.Options{Version: version, WebRoot: web.Content()})
+	// instrument позволяет заметить окно браузера, которое открылось,
+	// но не показало страницу (см. openDesktop в desktop_windows.go).
+	h := instrument(server.NewMux(server.Options{Version: version, WebRoot: web.Content()}))
 
 	log.Printf("MikroTik Inspector %s запущен", version)
 	var done <-chan error

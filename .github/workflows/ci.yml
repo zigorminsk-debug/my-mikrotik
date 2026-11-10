@@ -111,11 +111,18 @@ jobs:
             -ldflags "-s -w ${EXTRA} -X main.version=${VERSION}" \
             -o "dist/${{ matrix.artifact }}" .
 
+      - name: Иконка для установщика и ярлыков
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: |
+          go run ./tools/makeicon -out windows/app.ico
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Сборка установщика Windows
         if: matrix.goos == 'windows'
         shell: pwsh
         run: |
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=0.0.0" "/DSourceExe=$PWD\dist\${{ matrix.artifact }}" "/DOutputDir=$PWD\dist" windows/setup.iss
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=0.0.0" "/DSourceExe=$PWD\dist\${{ matrix.artifact }}" "/DSetupIcon=$PWD\windows\app.ico" "/DOutputDir=$PWD\dist" windows/setup.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Проверка установленной программы Windows
