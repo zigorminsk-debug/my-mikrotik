@@ -268,6 +268,9 @@ func openDesktop(url string) (<-chan error, func(), error) {
 			}
 		}
 		log.Printf("Завершение: окно закрыто=%v, выход из меню=%v", exited, quitting)
+		if edgeErr != nil {
+			log.Printf("Окно Edge завершилось с ошибкой: %v", edgeErr)
+		}
 		if e := os.RemoveAll(profile); e != nil {
 			log.Printf("Не удалось удалить временный профиль Edge: %v", e)
 		}

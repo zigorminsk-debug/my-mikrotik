@@ -42,4 +42,4 @@ Name: "{autodesktop}\MikroTik Inspector"; Filename: "{app}\MikroTikInspector.exe
 [Tasks]
 Name: "desktopicon"; Description: "Создать значок на рабочем столе"; Flags: unchecked
 [Run]
-Filename: "{app}\MikroTikInspector.exe"; Description: "Запустить MikroTik Inspector"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\MikroTikInspector.exe"; Description: "Запустить MikroTik Inspector"; Flags: nowait postinstall skipifsilent runascurrentuser
