@@ -25,10 +25,22 @@ func TestFailoverGeneration(t *testing.T) {
 		// Перенос правила в начало цепочки не должен ронять весь скрипт.
 		for _, want := range []string{"routing-table=mti-probe", "blackhole", "chain=output protocol=icmp dst-address=8.8.4.4", "new-routing-mark=mti-probe", `\$now - \$mtiFailBad >= 30s`, `\$now - \$mtiFailGood >= 1m`, "interval=5s", "default-route-distance=",
 			":do { /ip firewall mangle move [find comment=mti-probe] 0 } on-error={",
+			// В RouterOS 7 /ping при нуле ответов возвращает «ничего»:
+			// значение можно брать только после проверки типа.
+			"count=3 interval=1s", ":set rtype [:typeof \\$r]", `:if (\$rtype = \"num\") do={ :set replies \$r }`,
+			"mti-failover: backup=", "/ip firewall connection remove [find]",
 		} {
 			if !strings.Contains(res.Script, want) {
 				t.Errorf("%s missing %s", mode, want)
 			}
+		}
+		// Присваивание результата /ping напрямую очищает переменную —
+		// канал при этом всегда считается живым и переключения не бывает.
+		if strings.Contains(res.Script, ":set replies [/ping") {
+			t.Errorf("%s: прямой результат /ping присваивается переменной", mode)
+		}
+		if mode == "dhcp" && !strings.Contains(res.Script, `/ip dhcp-client renew [find where interface=ether1]`) {
+			t.Error("dhcp: нет обновления аренды, если distance маршрута не применился")
 		}
 	}
 }
