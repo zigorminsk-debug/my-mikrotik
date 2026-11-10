@@ -233,7 +233,7 @@
     <section class="card">
       <h2>Подключение к роутеру</h2>
       <div class="row"><button type="button" class="ghost" id="discover">Найти MikroTik в сети</button></div>
-      <div class="hint">Поиск MNDP работает в локальном L2-сегменте и может блокироваться Wi‑Fi или брандмауэром. Данные соседей не проверяются. В поле «Адрес роутера» можно указать MAC-адрес (например, <code>AA:BB:CC:DD:EE:FF</code>) — Inspector подключится по MAC (MAC-Telnet), как WinBox → Neighbors, без IP. Для MAC-подключения компьютер должен быть в том же L2-сегменте, а на роутере должен быть включён MAC-Telnet/MAC-WinBox на разрешённых интерфейсах.</div>
+      <div class="hint">Поиск MNDP работает в локальном L2-сегменте и может блокироваться Wi‑Fi или брандмауэром. Данные соседей не проверяются. В поле «Адрес роутера» можно указать MAC-адрес (например, <code>AA:BB:CC:DD:EE:FF</code>) — Inspector подключится по MAC (MAC-Telnet), как WinBox → Neighbors, без IP; протокол MAC-Telnet выберется автоматически. Для MAC-подключения компьютер должен быть в том же L2-сегменте, а на роутере должен быть включён MAC-Telnet/MAC-WinBox на разрешённых интерфейсах.</div>
       <div id="discovery-result" class="hint"></div>
       <form id="connform" autocomplete="off">
         <div class="grid">
@@ -658,6 +658,7 @@
       if (p.user) $("user").value = p.user;
       if (p.protocol) $("protocol").value = p.protocol;
       $("tls").checked = !!p.tls;
+      syncProtocolFromHost();
     } catch (e) {}
   }
 
@@ -671,6 +672,34 @@
       protocol: $("protocol").value
     };
   }
+
+  // MAC-адрес в поле адреса означает подключение по MAC (MAC-Telnet) —
+  // как в WinBox: протокол выбирается автоматически, без ручного выбора.
+  // Форматы совпадают с net.ParseMAC на сервере: AA:BB:CC:DD:EE:FF,
+  // AA-BB-CC-DD-EE-FF и Cisco AABB.CCDD.EEFF.
+  function isMACAddress(s) {
+    s = (s || "").trim();
+    return /^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/.test(s) ||
+      /^[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}$/.test(s);
+  }
+
+  var protocolBeforeMAC = "auto";
+
+  function syncProtocolFromHost() {
+    var sel = $("protocol");
+    if (isMACAddress($("host").value)) {
+      if (sel.value !== "mac") protocolBeforeMAC = sel.value;
+      sel.value = "mac";
+      sel.disabled = true;
+      sel.title = "MAC-Telnet выбран автоматически, потому что в поле адреса указан MAC-адрес";
+    } else {
+      sel.disabled = false;
+      sel.title = "";
+      if (sel.value === "mac") sel.value = protocolBeforeMAC;
+    }
+  }
+
+  $("host").addEventListener("input", syncProtocolFromHost);
 
   function showError(msg) {
     var box = $("status");
@@ -1068,8 +1097,8 @@
       data.neighbors.forEach(function(n){
         var row=document.createElement("div"), text=document.createElement("span");
         text.textContent = [n.identity || "MikroTik", n.mac, n.ip || "IP не указан", n.board, n.version].filter(Boolean).join(" · "); row.appendChild(text);
-        if(n.ip){var use=document.createElement("button"); use.type="button"; use.className="ghost"; use.textContent="Выбрать IP"; use.addEventListener("click",function(){ $("host").value=n.ip; }); row.appendChild(use);}
-        if(n.mac){var useMac=document.createElement("button"); useMac.type="button"; useMac.className="ghost"; useMac.textContent="Выбрать MAC"; useMac.addEventListener("click",function(){ $("host").value=n.mac; $("protocol").value="mac"; }); row.appendChild(useMac);}
+        if(n.ip){var use=document.createElement("button"); use.type="button"; use.className="ghost"; use.textContent="Выбрать IP"; use.addEventListener("click",function(){ $("host").value=n.ip; syncProtocolFromHost(); }); row.appendChild(use);}
+        if(n.mac){var useMac=document.createElement("button"); useMac.type="button"; useMac.className="ghost"; useMac.textContent="Выбрать MAC"; useMac.addEventListener("click",function(){ $("host").value=n.mac; syncProtocolFromHost(); }); row.appendChild(useMac);}
         box.appendChild(row);
       });
     }).catch(function(e){box.textContent="Ошибка поиска: "+e.message;}).finally(function(){btn.disabled=false;});
@@ -1184,6 +1213,7 @@
     $("password").value = "";
     $("protocol").value = "auto";
     $("tls").checked = false;
+    syncProtocolFromHost();
     // Обычная отправка формы сохраняет настройки и проходит тот же путь подключения.
     $("go").click();
   });
