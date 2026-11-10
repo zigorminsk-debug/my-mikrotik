@@ -1,5 +1,6 @@
 // Package server — общий HTTP-слой программы: HTML-интерфейс, API
-// (/api/info, /api/interfaces, /api/config, /api/apply), иконки и манифест PWA.
+// (/api/info, /api/interfaces, /api/config, /api/apply, /api/log), иконки и
+// манифест PWA.
 //
 // Пакет используют и настольная версия, и Android-приложение: обе запускают
 // локальный сервер и показывают одну и ту же страницу.
@@ -14,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/zigorminsk-debug/my-mikrotik/mikrotik"
@@ -59,6 +61,7 @@ func NewMux(opt Options) http.Handler {
 	mux.HandleFunc("/api/geo/countries", handleGeoCountries)
 	mux.HandleFunc("/api/geo/prefixes", handleGeoPrefixes)
 	mux.HandleFunc("/api/apply", handleApply(ver))
+	mux.HandleFunc("/api/log", handleLog(ver))
 
 	return withSecurityHeaders(mux)
 }
@@ -184,6 +187,44 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleApply применяет сформированный скрипт на роутере.
+// handleLog возвращает записи журнала роутера. Это основной способ понять, как
+// отработал применённый скрипт: вывод команд наружу не передаётся, поэтому
+// скрипты пишут результат в журнал.
+func handleLog(ver string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			mikrotik.Params
+			Filter string `json:"filter"`
+			Limit  int    `json:"limit"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, apiResponse{OK: false, Error: "некорректный запрос: " + err.Error()})
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+
+		filter := strings.TrimSpace(req.Filter)
+		if filter == "" {
+			filter = "mti" // маркер сообщений наших скриптов
+		}
+		list, err := mikrotik.CollectLog(ctx, req.Params, filter, req.Limit)
+		if err != nil {
+			writeJSON(w, http.StatusOK, apiResponse{OK: false, Error: err.Error(), Version: ver})
+			return
+		}
+		writeJSON(w, http.StatusOK, struct {
+			OK      bool                `json:"ok"`
+			Log     []mikrotik.LogEntry `json:"log"`
+			Version string              `json:"version,omitempty"`
+		}{OK: true, Log: list, Version: ver})
+	}
+}
+
 func handleApply(ver string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {

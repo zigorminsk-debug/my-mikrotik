@@ -31,6 +31,13 @@ func ApplyScript(ctx context.Context, p Params, source string) (string, error) {
 		return "", fmt.Errorf("скрипт слишком большой (%d ББ, максимум %d)", len(source), maxScriptSize)
 	}
 
+	if p.Protocol == "mac" {
+		if err := applyMAC(ctx, &p, source); err != nil {
+			return "", err
+		}
+		return "mac", nil
+	}
+
 	var protocols []string
 	switch p.Protocol {
 	case "api":
@@ -74,6 +81,16 @@ func applyAPI(ctx context.Context, p *Params, source string) error {
 	}
 
 	// Старый скрипт может отсутствовать — ошибку этого шага игнорируем.
+	// Имя в numbers понимают не все версии, поэтому сначала пробуем по .id:
+	// иначе повторное применение после неудачи падает на создании скрипта
+	// («already exists») вместо настоящей причины.
+	if recs, _, err := c.exec("/system/script/print", "?name="+applyScriptName, "=.proplist=.id"); err == nil {
+		for _, m := range recs {
+			if id := m[".id"]; id != "" {
+				_, _, _ = c.exec("/system/script/remove", "=numbers="+id)
+			}
+		}
+	}
 	_, _, _ = c.exec("/system/script/remove", "=numbers="+applyScriptName)
 
 	if _, _, err := c.exec("/system/script/add",
@@ -104,6 +121,15 @@ func applyREST(ctx context.Context, p *Params, source string) error {
 	}
 
 	// Удаление старого скрипта — может отсутствовать, ошибку игнорируем.
+	// Снимаем по .id: оставшийся после неудачи скрипт иначе не даёт создать
+	// новый (HTTP 400 «already exists»).
+	if list, err := rc.get(ctx, "/rest/system/script?name="+applyScriptName); err == nil {
+		for _, m := range list {
+			if id := jstr(m, ".id"); id != "" {
+				_, _ = rc.post(ctx, "/rest/system/script/remove", map[string]any{"numbers": id})
+			}
+		}
+	}
 	_, _ = rc.post(ctx, "/rest/system/script/remove", map[string]any{"numbers": applyScriptName})
 
 	if _, err := rc.post(ctx, "/rest/system/script", map[string]any{

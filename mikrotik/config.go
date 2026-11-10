@@ -67,6 +67,8 @@ type WiFiSettings struct {
 
 // Settings — все настройки конструктора.
 type Settings struct {
+	WAN              WANSettings             `json:"wan"`
+	PortForward      PortForwardSettings     `json:"portForward"`
 	Backup           BackupSettings          `json:"backup"`
 	GeoNAT           GeoNATSettings          `json:"geoNat"`
 	Security         SecuritySettings        `json:"security"`
@@ -211,6 +213,8 @@ func AnalyzeFeatures(device *Info, ifaces []Iface) []FeatureInfo {
 	wifiIface := hasAnyIface(ifaces, IsWiFiIface)
 
 	features := []FeatureInfo{
+		{ID: "wan", Title: "Интернет и резервный канал", Path: "/ip route", Package: "system/dhcp", Available: has("system") && has("dhcp"), Reason: reasonIf(!has("system") || !has("dhcp"), "system/dhcp")},
+		{ID: "portForward", Title: "Проброс портов", Path: "/ip firewall nat", Package: "system", Available: has("system") || device == nil, Reason: reasonIf(!has("system") && device != nil, "system")},
 		{ID: "backup", Title: "Бэкап по расписанию", Path: "/system scheduler", Package: "system", Available: has("system"), Reason: reasonIf(!has("system"), "system")},
 		{ID: "geoNat", Title: "Белый список для dst-nat", Path: "/ip firewall filter", Package: "system", Available: has("system"), Reason: reasonIf(!has("system"), "system")},
 		{ID: "security", Title: "Защита WAN и WinBox", Path: "/ip firewall filter", Package: "system", Available: has("system"), Reason: reasonIf(!has("system"), "system")},
@@ -604,6 +608,17 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 
 	res := &ConfigResult{OK: true, Features: features}
 	var errs []string
+	if s.WAN.Enabled && avail["wan"] {
+		errs = append(errs, validateWAN(s.WAN, s.PPPoE)...)
+		errs = append(errs, validateWANLocal(s.WAN, s.LAN)...)
+		errs = append(errs, validateWANInterfaces(s.WAN, ifaces)...)
+		if s.WAN.Failover && (device == nil || !strings.HasPrefix(device.RouterOS, "7.")) {
+			errs = append(errs, "Контроль интернета поддерживается только для RouterOS 7")
+		}
+	}
+	if s.PortForward.Enabled && avail["portForward"] {
+		errs = append(errs, validatePortForward(s.PortForward)...)
+	}
 
 	// --- вычисления ---
 	var (
@@ -730,7 +745,11 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 	}
 
 	if s.Backup.Enabled && avail["backup"] {
-		errs = append(errs, validateBackup(s.Backup)...)
+		rosVersion := ""
+		if device != nil {
+			rosVersion = device.RouterOS
+		}
+		errs = append(errs, validateBackup(s.Backup, rosVersion)...)
 	}
 	if s.GeoNAT.Enabled && avail["geoNat"] {
 		errs = append(errs, validateGeoNAT(s.GeoNAT, ifaces, s)...)
@@ -758,6 +777,10 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 	for _, f := range features {
 		enabled := false
 		switch f.ID {
+		case "wan":
+			enabled = s.WAN.Enabled
+		case "portForward":
+			enabled = s.PortForward.Enabled
 		case featLAN:
 			enabled = s.LAN.Enabled
 		case featDHCP:
@@ -799,7 +822,7 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 	}
 
 	// --- скрипт ---
-	res.Script = buildScript(device, s, now, avail, lanNetwork, lanGateway, lanPool, mode)
+	res.Script = buildScript(device, s, now, avail, lanNetwork, lanGateway, lanPool, mode, ifaces)
 	return res
 }
 
@@ -835,7 +858,7 @@ func section(b *strings.Builder, menu, title string) {
 }
 
 func buildScript(device *Info, s *Settings, now time.Time, avail map[string]bool,
-	lanNetwork, lanGateway, lanPool, wifiMode string) string {
+	lanNetwork, lanGateway, lanPool, wifiMode string, ifaces []Iface) string {
 
 	var b strings.Builder
 	model := "неизвестная модель"
@@ -855,7 +878,7 @@ func buildScript(device *Info, s *Settings, now time.Time, avail map[string]bool
 	anyOn := false
 	if s.Backup.Enabled && avail["backup"] {
 		anyOn = true
-		writeBackup(&b, s.Backup)
+		writeBackup(&b, s.Backup, rosVer)
 	}
 
 	if s.LAN.Enabled && avail[featLAN] {
@@ -887,7 +910,7 @@ func buildScript(device *Info, s *Settings, now time.Time, avail map[string]bool
 			attr("interface", dhcpIface(s)),
 			attr("address-pool", "mti-pool"),
 			attr("lease-time", strings.TrimSpace(s.DHCP.LeaseTime)))
-		fmt.Fprintf(&b, "/ip dhcp-server-network remove [find comment=mti-net]\n")
+		fmt.Fprintf(&b, "/ip dhcp-server network remove [find comment=mti-net]\n")
 		netAttrs := []string{
 			attr("address", lanNetwork),
 			attr("gateway", lanGateway),
@@ -896,7 +919,7 @@ func buildScript(device *Info, s *Settings, now time.Time, avail map[string]bool
 			netAttrs = append(netAttrs, attr("dns-server", strings.TrimSpace(s.DNS.Servers)))
 		}
 		netAttrs = append(netAttrs, "comment=mti-net")
-		fmt.Fprintf(&b, "/ip dhcp-server-network add %s\n", strings.Join(netAttrs, " "))
+		fmt.Fprintf(&b, "/ip dhcp-server network add %s\n", strings.Join(netAttrs, " "))
 	}
 
 	if s.DNS.Enabled && avail[featDNS] {
@@ -913,8 +936,23 @@ func buildScript(device *Info, s *Settings, now time.Time, avail map[string]bool
 	if s.NTP.Enabled && avail[featNTP] {
 		anyOn = true
 		section(&b, "System", "NTP Client")
-		fmt.Fprintf(&b, "/system ntp client set enabled=yes %s\n",
-			attr("servers", strings.TrimSpace(s.NTP.Servers)))
+		if device != nil && strings.HasPrefix(device.RouterOS, "7.") {
+			b.WriteString("/system ntp client set enabled=yes\n")
+			// Сохраняем существующие записи: добавляем только недостающие адреса.
+			for _, host := range splitList(s.NTP.Servers) {
+				fmt.Fprintf(&b, ":if ([:len [/system ntp client servers find where address=%s]] = 0) do={ /system ntp client servers add %s }\n", rosQuote(host), attr("address", host))
+			}
+		} else {
+			hosts := splitList(s.NTP.Servers)
+			primary, secondary := "0.0.0.0", "0.0.0.0"
+			if len(hosts) > 0 {
+				primary = hosts[0]
+			}
+			if len(hosts) > 1 {
+				secondary = hosts[1]
+			}
+			fmt.Fprintf(&b, "/system ntp client set enabled=yes %s %s\n", attr("primary-ntp", primary), attr("secondary-ntp", secondary))
+		}
 		fmt.Fprintf(&b, "/system clock set %s\n", attr("time-zone-name", strings.TrimSpace(s.NTP.TimeZone)))
 	}
 
@@ -950,18 +988,17 @@ func buildScript(device *Info, s *Settings, now time.Time, avail map[string]bool
 		ifs := strings.TrimSpace(s.WiFi.Interface)
 		if wifiMode == "wave2" {
 			fmt.Fprintf(&b, "/interface wifi configuration remove [find name=mti-wifi]\n")
-			fmt.Fprintf(&b, "/interface wifi configuration add %s mode=ap %s %s %s\n",
+			fmt.Fprintf(&b, "/interface wifi configuration add %s mode=ap security.authentication-types=wpa2-psk %s %s %s\n",
 				attr("name", "mti-wifi"),
 				attr("ssid", strings.TrimSpace(s.WiFi.SSID)),
-				attr("passphrase", s.WiFi.Passphrase),
-				attr("country", strings.TrimSpace(s.WiFi.Country)))
+				attr("security.passphrase", s.WiFi.Passphrase),
+				attr("country", wifiCountry(s.WiFi.Country)))
 			fmt.Fprintf(&b, "/interface wifi set %s configuration=mti-wifi disabled=no\n", rosQuote(ifs))
 		} else {
-			fmt.Fprintf(&b, "/interface wireless set %s disabled=no mode=ap %s country=%s authentication-types=wpa2-psk %s\n",
-				rosQuote(ifs),
-				attr("ssid", strings.TrimSpace(s.WiFi.SSID)),
-				rosQuote(strings.TrimSpace(s.WiFi.Country)),
-				attr("passphrase", s.WiFi.Passphrase))
+			b.WriteString(":if ([:len [/interface wireless security-profiles find where name=\"mti-wifi\"]] = 0) do={ /interface wireless security-profiles add name=mti-wifi }\n")
+			fmt.Fprintf(&b, "/interface wireless security-profiles set [find where name=\"mti-wifi\"] mode=dynamic-keys authentication-types=wpa2-psk unicast-ciphers=aes-ccm group-ciphers=aes-ccm %s\n", attr("wpa2-pre-shared-key", s.WiFi.Passphrase))
+			fmt.Fprintf(&b, "/interface wireless set %s disabled=no mode=ap-bridge %s %s security-profile=mti-wifi\n",
+				rosQuote(ifs), attr("ssid", strings.TrimSpace(s.WiFi.SSID)), attr("country", wifiCountry(s.WiFi.Country)))
 		}
 	}
 
@@ -1000,10 +1037,30 @@ func buildScript(device *Info, s *Settings, now time.Time, avail map[string]bool
 		}
 		writeSecurity(&b, s.Security, ipv6)
 	}
+	if s.PortForward.Enabled && avail["portForward"] {
+		anyOn = true
+		buildPortForward(&b, s.PortForward)
+	}
+
+	if s.WAN.Enabled && avail["wan"] {
+		anyOn = true
+		buildWAN(&b, s.WAN, device, ifaces)
+	}
+
 	if !anyOn {
 		b.WriteString("\n# Настройки не выбраны — отметьте разделы в меню конструктора.\n")
 	}
 	return b.String()
+}
+
+// RouterOS ждёт название страны, а не двухбуквенный код ISO.
+func wifiCountry(value string) string {
+	value = strings.TrimSpace(value)
+	countries := map[string]string{"BY": "belarus", "RU": "russia", "UA": "ukraine", "PL": "poland", "LT": "lithuania", "LV": "latvia", "DE": "germany", "US": "united states", "GB": "united kingdom"}
+	if country, ok := countries[strings.ToUpper(value)]; ok {
+		return country
+	}
+	return strings.ToLower(value)
 }
 
 func yesNo(v bool) string {

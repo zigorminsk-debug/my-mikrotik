@@ -233,12 +233,12 @@
     <section class="card">
       <h2>Подключение к роутеру</h2>
       <div class="row"><button type="button" class="ghost" id="discover">Найти MikroTik в сети</button></div>
-      <div class="hint">Поиск MNDP работает в локальном L2-сегменте и может блокироваться Wi‑Fi или брандмауэром. Данные соседей не проверяются. Для настоящего MAC-подключения без IP используйте WinBox → Neighbors; Inspector подключается только по IP.</div>
+      <div class="hint">Поиск MNDP работает в локальном L2-сегменте и может блокироваться Wi‑Fi или брандмауэром. Данные соседей не проверяются. В поле «Адрес роутера» можно указать MAC-адрес (например, <code>AA:BB:CC:DD:EE:FF</code>) — Inspector подключится по MAC (MAC-Telnet), как WinBox → Neighbors, без IP; протокол MAC-Telnet выберется автоматически. Для MAC-подключения компьютер должен быть в том же L2-сегменте, а на роутере должен быть включён MAC-Telnet/MAC-WinBox на разрешённых интерфейсах.</div>
       <div id="discovery-result" class="hint"></div>
       <form id="connform" autocomplete="off">
         <div class="grid">
-          <label class="field">Адрес роутера
-            <input id="host" name="host" placeholder="192.168.88.1" required>
+          <label class="field">Адрес роутера или MAC
+            <input id="host" name="host" placeholder="192.168.88.1 или AA:BB:CC:DD:EE:FF" required>
           </label>
           <label class="field">Порт (0 — по умолчанию)
             <input id="port" name="port" type="number" min="0" max="65535" placeholder="0">
@@ -254,6 +254,7 @@
               <option value="auto" selected>Авто (API → REST)</option>
               <option value="api">RouterOS API</option>
               <option value="rest">REST API</option>
+              <option value="mac">MAC-Telnet (по MAC)</option>
             </select>
           </label>
         </div>
@@ -486,8 +487,8 @@
                   <label class="field">Пароль (8–63 символа)
                     <input id="wifi-pass" type="password" maxlength="63" autocomplete="new-password" placeholder="••••••••">
                   </label>
-                  <label class="field">Страна (код)
-                    <input id="wifi-country" value="BY" maxlength="2" spellcheck="false" placeholder="BY">
+                  <label class="field">Страна (название RouterOS или код)
+                    <input id="wifi-country" value="BY" spellcheck="false" placeholder="BY">
                   </label>
                 </div>
                 <div class="sec-note" id="wifi-note"></div>
@@ -535,13 +536,19 @@
             <div class="sec" data-feat="backup"><label class="sec-head" for="chk-backup"><input type="checkbox" id="chk-backup"><span class="sec-title">Бэкап по расписанию на почту</span><span class="sec-path mono">/system scheduler</span><span class="lock" hidden></span></label>
               <div class="sec-body"><div class="grid">
                 <label class="field">Адрес получателя<input id="backup-recipient" type="email" autocomplete="off"></label>
-                <label class="field">Пароль шифрования backup (от 12 байт)<input id="backup-password" type="password" autocomplete="new-password"></label>
+                <label class="field">Отправитель (From)<input id="backup-from" type="email" autocomplete="off"></label>
+                <label class="field">SMTP-сервер: имя или IP<input id="backup-smtpServer" type="text" placeholder="smtp.example.com" autocomplete="off" spellcheck="false"></label>
+                <label class="field">Порт SMTP<input id="backup-smtpPort" type="number" min="1" max="65535" value="587" autocomplete="off" spellcheck="false"></label>
+                <label class="field">Шифрование SMTP<select id="backup-tls"><option value="starttls">STARTTLS, порт 587</option><option value="tls">TLS, порт 465 (RouterOS 7.13+)</option><option value="no">Без шифрования</option></select></label>
+                <label class="field">Логин SMTP<input id="backup-smtpUser" type="text" autocomplete="off" spellcheck="false"></label>
+                <label class="field">Пароль SMTP (пароль приложения)<input id="backup-smtpPass" type="password" autocomplete="new-password" spellcheck="false"></label>
+                <label class="field">Пароль шифрования backup (необязательно)<input id="backup-password" type="password" autocomplete="new-password"></label>
                 <label class="field">Время роутера<input id="backup-time" type="time" value="02:00"></label>
                 <label class="field">Период<select id="backup-interval"><option value="1d">Каждый день</option><option value="1w">Каждую неделю</option></select></label>
-              </div><div class="sec-note">Предварительно настройте /tool e-mail (SMTP, TLS, логин, пароль приложения) и отправьте тестовое письмо на самом роутере. Установите точное время и часовой пояс. Пароль бэкапа виден в скрипте и хранится на роутере; сохраните его отдельно. Не публикуйте скрипт. Перед каждым запуском старый mti-scheduled.backup удаляется, даже если создание нового не удастся; храните независимые копии. Новый файл остаётся на роутере; доставка письма не гарантируется — проверьте почту и журнал. Повторное применение заменяет задания mti-backup. Проверяйте восстановление на совместимом устройстве.</div></div></div></div>
+              </div><div class="sec-note" id="backup-smtp-hint" hidden></div><div class="sec-note">SMTP-сервер, порт, логин и пароль скрипт передаёт самой команде отправки, поэтому настраивать <span class="mono">/tool e-mail</span> на роутере не нужно: именно из-за ненастроенного <span class="mono">/tool e-mail</span> письма чаще всего и не уходят — команда просто падает без следа в журнале. Имя сервера разбирается командой <span class="mono">:resolve</span>, поэтому на роутере должен работать DNS (или укажите IP сразу). Логин SMTP обычно — полный адрес почты (как в поле «Отправитель»): часть серверов отклоняет вход и отправку, если логин или отправитель не совпадают с ящиком. Для Gmail, Яндекса и Mail.ru используйте пароль приложения. Установите точное время и часовой пояс, иначе планировщик сработает не тогда, когда вы ждёте. Каждый шаг пишется в журнал роутера — <span class="mono">/log print where message~"mti"</span>: по нему видно, создался ли файл и ушло ли письмо. Пароль SMTP и пароль шифрования видны в тексте скрипта: ограничьте доступ к роутеру и не публикуйте скрипт. Файл <span class="mono">mti-scheduled.backup</span> остаётся на роутере и перед следующим запуском удаляется, в том числе при неудаче; храните независимые копии. Доставка письма не гарантируется. Повторное применение заменяет задания mti-backup. Проверяйте восстановление на совместимом устройстве.</div><div class="actions"><button type="button" class="ghost" id="backup-log">Показать журнал роутера (mti)</button></div><pre class="mono" id="backup-log-out" hidden style="white-space:pre-wrap;word-break:break-word;max-height:16rem;overflow:auto;background:var(--panel-2,#f6f7f9);border:1px solid var(--border,#d8dce3);border-radius:8px;padding:.6rem .7rem;margin:.5rem 0 0;font-size:.78rem"></pre></div></div></div>
           <div class="menu-group"><div class="menu-title">VPN</div>
-<div class="sec" data-feat="wgServer"><label class="sec-head" for="chk-wgServer"><input type="checkbox" id="chk-wgServer"><span class="sec-title">WireGuard — MikroTik сервер</span><span class="sec-path mono">/interface wireguard</span><span class="lock" hidden></span></label><div class="sec-body"><div class="grid"><label class="field">Приватный ключ этого MikroTik<input id="wgServer-privateKey" type="password" value="" autocomplete="off" spellcheck="false"></label><label class="field">Публичный ключ другой стороны<input id="wgServer-publicKey" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">Адрес интерфейса с маской<input id="wgServer-address" type="text" value="10.10.10.1/24" autocomplete="off" spellcheck="false"></label><label class="field">Allowed Address: сети другой стороны (CIDR)<input id="wgServer-allowedIPs" type="text" value="10.10.10.2/32" autocomplete="off" spellcheck="false"></label><label class="field">Локальный UDP-порт<input id="wgServer-listenPort" type="number" min="1" max="65535" value="13231" autocomplete="off" spellcheck="false"></label></div><div class="sec-note">WireGuard использует только UDP. Порты можно изменить; порт сервера в клиенте должен совпадать с локальным портом сервера. Ключи создайте заранее. На сервере разрешите входящий UDP-порт; маршруты и firewall на обеих сторонах настройте отдельно. Создаётся один peer. Повторное применение требует ручного удаления созданного интерфейса.</div></div></div>
-<div class="sec" data-feat="wgClient"><label class="sec-head" for="chk-wgClient"><input type="checkbox" id="chk-wgClient"><span class="sec-title">WireGuard — MikroTik клиент</span><span class="sec-path mono">/interface wireguard</span><span class="lock" hidden></span></label><div class="sec-body"><div class="grid"><label class="field">Приватный ключ этого MikroTik<input id="wgClient-privateKey" type="password" value="" autocomplete="off" spellcheck="false"></label><label class="field">Публичный ключ другой стороны<input id="wgClient-publicKey" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">Адрес интерфейса с маской<input id="wgClient-address" type="text" value="10.10.10.2/24" autocomplete="off" spellcheck="false"></label><label class="field">Allowed Address: сети другой стороны (CIDR)<input id="wgClient-allowedIPs" type="text" value="10.10.10.0/24" autocomplete="off" spellcheck="false"></label><label class="field">Локальный UDP-порт<input id="wgClient-listenPort" type="number" min="1" max="65535" value="13231" autocomplete="off" spellcheck="false"></label><label class="field">Адрес сервера<input id="wgClient-endpoint" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">UDP-порт сервера<input id="wgClient-endpointPort" type="number" min="1" max="65535" value="13231" autocomplete="off" spellcheck="false"></label></div><div class="sec-note">WireGuard использует только UDP. Порты можно изменить; порт сервера в клиенте должен совпадать с локальным портом сервера. Ключи создайте заранее. На сервере разрешите входящий UDP-порт; маршруты и firewall на обеих сторонах настройте отдельно. Создаётся один peer. Повторное применение требует ручного удаления созданного интерфейса.</div></div></div>
+<div class="sec" data-feat="wgServer"><label class="sec-head" for="chk-wgServer"><input type="checkbox" id="chk-wgServer"><span class="sec-title">WireGuard — MikroTik сервер</span><span class="sec-path mono">/interface wireguard</span><span class="lock" hidden></span></label><div class="sec-body"><div class="grid"><label class="field">Шаг настройки<select id="wgServer-step"><option value="interface">Шаг 1 — поднять интерфейс (ключ создаст роутер)</option><option value="peer">Шаг 2 — добавить peer</option></select></label><label class="field">Публичный ключ другой стороны<input id="wgServer-publicKey" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">Адрес интерфейса с маской<input id="wgServer-address" type="text" value="10.10.10.1/24" autocomplete="off" spellcheck="false"></label><label class="field">Allowed Address: сети другой стороны (CIDR)<input id="wgServer-allowedIPs" type="text" value="10.10.10.2/32" autocomplete="off" spellcheck="false"></label><label class="field">Локальный UDP-порт<input id="wgServer-listenPort" type="number" min="1" max="65535" value="13231" autocomplete="off" spellcheck="false"></label></div><div class="sec-note">WireGuard использует только UDP. Приватный ключ создаёт сам роутер: на <b>шаге 1</b> интерфейс поднимается и получает адрес, а его публичный ключ выводится скриптом и сохраняется в комментарии интерфейса — он появится ниже после обновления данных. Передайте этот ключ другой стороне, затем переключитесь на <b>шаг 2</b> и укажите публичный ключ другой стороны, адрес сервера и сети туннеля. На сервере разрешите входящий UDP-порт; маршруты и firewall на обеих сторонах настройте отдельно. Создаётся один peer.</div><div class="sec-note mono" id="wgServer-pubkey"></div></div></div>
+<div class="sec" data-feat="wgClient"><label class="sec-head" for="chk-wgClient"><input type="checkbox" id="chk-wgClient"><span class="sec-title">WireGuard — MikroTik клиент</span><span class="sec-path mono">/interface wireguard</span><span class="lock" hidden></span></label><div class="sec-body"><div class="grid"><label class="field">Шаг настройки<select id="wgClient-step"><option value="interface">Шаг 1 — поднять интерфейс (ключ создаст роутер)</option><option value="peer">Шаг 2 — добавить peer</option></select></label><label class="field">Публичный ключ другой стороны<input id="wgClient-publicKey" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">Адрес интерфейса с маской<input id="wgClient-address" type="text" value="10.10.10.2/24" autocomplete="off" spellcheck="false"></label><label class="field">Allowed Address: сети другой стороны (CIDR)<input id="wgClient-allowedIPs" type="text" value="10.10.10.0/24" autocomplete="off" spellcheck="false"></label><label class="field">Локальный UDP-порт<input id="wgClient-listenPort" type="number" min="1" max="65535" value="13231" autocomplete="off" spellcheck="false"></label><label class="field">Адрес сервера<input id="wgClient-endpoint" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">UDP-порт сервера<input id="wgClient-endpointPort" type="number" min="1" max="65535" value="13231" autocomplete="off" spellcheck="false"></label></div><div class="sec-note">WireGuard использует только UDP. Приватный ключ создаёт сам роутер: на <b>шаге 1</b> интерфейс поднимается и получает адрес, а его публичный ключ выводится скриптом и сохраняется в комментарии интерфейса — он появится ниже после обновления данных. Передайте этот ключ серверу, затем переключитесь на <b>шаг 2</b> и укажите публичный ключ сервера, его адрес и порт, а также сети туннеля. Маршруты и firewall настраиваются отдельно. Создаётся один peer.</div><div class="sec-note mono" id="wgClient-pubkey"></div></div></div>
 <div class="sec" data-feat="ovpnCertificates">
   <label class="sec-head" for="chk-ovpnCertificates"><input type="checkbox" id="chk-ovpnCertificates"><span class="sec-title">OpenVPN — выпуск сертификатов</span><span class="sec-path mono">/certificate</span><span class="lock" hidden></span></label>
   <div class="sec-body"><div class="grid">
@@ -555,6 +562,49 @@
 <div class="actions"><button type="button" class="ghost" id="btn-ovpn-export">Скачать профиль клиента .ovpn</button></div><div class="sec-note">Для OpenVPN 2.6+. Файл содержит логин, пароль и при выборе PKCS12 — закрытый ключ. Передавайте и храните его защищённо. Пароль PKCS12 клиент запросит при подключении.</div>
 <div class="sec-note">TCP или UDP и порт должны совпадать с настройками сервера. Режим IP, AES-256-CBC / SHA1; сервер должен поддерживать эти параметры. Импортируйте доверенный CA и при необходимости клиентский сертификат до применения. Маршруты и firewall настраиваются отдельно. Повторное применение требует ручного удаления подключения.</div></div></div>
 <div class="sec" data-feat="pptp"><label class="sec-head" for="chk-pptp"><input type="checkbox" id="chk-pptp"><span class="sec-title">PPTP клиент</span><span class="sec-path mono">/interface pptp-client</span><span class="lock" hidden></span></label><div class="sec-body"><div class="grid"><label class="field">Адрес сервера<input id="pptp-server" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">Логин<input id="pptp-user" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">Пароль<input id="pptp-password" type="password" value="" autocomplete="off" spellcheck="false"></label></div><div class="sec-note">PPTP устарел и небезопасен; по возможности используйте WireGuard. Маршруты и firewall настраиваются отдельно. Повторное применение требует ручного удаления подключения.</div></div></div>
+          </div>
+
+          <div class="menu-group">
+            <div class="menu-title">Интернет → WAN</div>
+            <div class="sec" data-feat="wan">
+              <label class="sec-head" for="chk-wan">
+                <input type="checkbox" id="chk-wan"><span class="sec-title">Основной и резервный IPv4-каналы</span>
+                <span class="lock" hidden></span>
+              </label>
+              <div class="sec-body">
+                <p>Основной и необязательный резервный провайдер: LTE или проводной (DHCP / статический IPv4).
+                Для PPPoE пока используется отдельный раздел. VLAN провайдера нужно создать заранее.</p>
+                <div class="grid">
+                  <label class="field"><span>Контроль интернета: 30 с без ответа → резерв, 60 с ответов → основной (RouterOS 7)</span><input type="checkbox" id="wan-failover"></label>
+                  <label class="field">Контрольный IPv4 (только через основной канал)<input id="wan-probe" value="8.8.8.8" spellcheck="false"></label>
+                </div>
+                <p>Проверка каждые 5 секунд. При включении нужны два провайдера. Проверка основного продолжается на резерве. ICMP роутера к этому узлу закрепляется за основным каналом.</p>
+                <div id="wan-links"></div>
+                <button type="button" class="ghost" id="wan-add">Добавить провайдера</button>
+                <p>Без контроля интернета: DHCP реагирует на потерю lease/link; ping шлюза проверяет только шлюз. Контрольный узел должен отвечать на ICMP.
+                Существующий DHCP-клиент выбранного порта будет включён и обновлён: default route, distance и отключение peer DNS. Его комментарий сохраняется. Проверьте существующие маршруты перед применением.
+                Настройки DNS задаются отдельно. Снятие галочки не удаляет ранее применённые настройки.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="menu-group">
+            <div class="menu-title">IP → Firewall → NAT</div>
+            <div class="sec" data-feat="portForward">
+              <label class="sec-head" for="chk-portForward">
+                <input type="checkbox" id="chk-portForward">
+                <span class="sec-title">Проброс портов и Hairpin NAT</span>
+                <span class="lock" hidden></span>
+              </label>
+              <div class="sec-body">
+                <p>Каждое правило открывает доступ к локальному сервису. Без ограничения источника — для всего интернета.
+                Проверьте порядок NAT и разрешение dstnat в цепочке forward: firewall автоматически не меняется.</p>
+                <div id="forward-rules"></div>
+                <button type="button" class="ghost" id="forward-add">Добавить правило</button>
+                <p>Hairpin требует фиксированный внешний IPv4 и подсеть LAN. Для динамического IP используйте внутренний DNS.
+                Повторное применение заменяет только правила mti-forward-*. Снятие галочки не удаляет настройки с роутера.</p>
+              </div>
+            </div>
           </div>
 
           <div class="actions">
@@ -620,7 +670,7 @@
     ["uptime", "Аптайм"]
   ];
 
-  var FEATURES = ["backup", "lan", "dhcp", "dns", "ntp", "pppoe", "wifi", "wgServer", "wgClient", "openvpn", "pptp", "ovpnCertificates", "security", "geoNat"];
+  var FEATURES = ["backup", "lan", "dhcp", "dns", "ntp", "pppoe", "wifi", "portForward", "wan", "wgServer", "wgClient", "openvpn", "pptp", "ovpnCertificates", "security", "geoNat"];
   var DEFAULT_ON = ["lan", "dhcp"];
   var DEFAULTS = { "dns-remote": true, "pppoe-route": true, "pppoe-dns": true, "pppoe-nat": true };
 
@@ -657,7 +707,70 @@
       if (p.user) $("user").value = p.user;
       if (p.protocol) $("protocol").value = p.protocol;
       $("tls").checked = !!p.tls;
+      syncProtocolFromHost();
     } catch (e) {}
+  }
+
+  // Тихие отказы SMTP чаще всего из-за расхождения отправителя с учётной
+  // записью или из-за неверной пары порт/шифрование — подсказываем сразу.
+  function updateBackupHint() {
+    var hint = $("backup-smtp-hint");
+    var from = val("backup-from"), user = val("backup-smtpUser");
+    var port = val("backup-smtpPort"), tls = val("backup-tls");
+    var msg = "";
+    var dFrom = (from.split("@")[1] || "").toLowerCase();
+    var dUser = (user.split("@")[1] || "").toLowerCase();
+    if (from.indexOf("@") > 0 && user.indexOf("@") > 0 && dFrom && dUser && dFrom !== dUser) {
+      msg = "Отправитель «" + from + "» и логин «" + user + "» в разных доменах: " +
+        "сервер может отклонить вход или письмо. Обычно From совпадает с адресом учётной записи.";
+    }
+    if (tls === "starttls" && port === "465") {
+      msg += (msg ? " " : "") + "Порт 465 — обычно полный TLS, а не STARTTLS: " +
+        "выберите «TLS» или укажите порт 587.";
+    }
+    if (tls === "tls" && port === "587") {
+      msg += (msg ? " " : "") + "Порт 587 — обычно STARTTLS, а не полный TLS: " +
+        "выберите «STARTTLS» или укажите порт 465.";
+    }
+    hint.textContent = msg;
+    hint.hidden = !msg;
+  }
+
+  // Журнал роутера: по нему видно, создался ли файл бэкапа и ушло ли письмо.
+  function showBackupLog() {
+    var btn = $("backup-log");
+    var out = $("backup-log-out");
+    if (!lastInfo) { showError("Сначала подключитесь к роутеру"); return; }
+    btn.disabled = true;
+    btn.textContent = "Читаем журнал…";
+    out.hidden = true;
+    var payload = connPayload();
+    payload.filter = "mti";
+    payload.limit = 200;
+    fetch("/api/log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.error || "не удалось прочитать журнал");
+        var lines = res.log || [];
+        if (!lines.length) {
+          out.textContent = "Записей с «mti» в журнале нет. " +
+            "Запустите задание вручную: /system script run mti-backup-email";
+        } else {
+          out.textContent = lines.map(function (e) {
+            return (e.time ? e.time + "  " : "") + (e.topics ? "[" + e.topics + "] " : "") + (e.message || "");
+          }).join("\n");
+        }
+        out.hidden = false;
+      })
+      .catch(function (e) { showError(e && e.message ? e.message : String(e)); })
+      .finally(function () {
+        btn.disabled = false;
+        btn.textContent = "Показать журнал роутера (mti)";
+      });
   }
 
   function connPayload() {
@@ -670,6 +783,34 @@
       protocol: $("protocol").value
     };
   }
+
+  // MAC-адрес в поле адреса означает подключение по MAC (MAC-Telnet) —
+  // как в WinBox: протокол выбирается автоматически, без ручного выбора.
+  // Форматы совпадают с net.ParseMAC на сервере: AA:BB:CC:DD:EE:FF,
+  // AA-BB-CC-DD-EE-FF и Cisco AABB.CCDD.EEFF.
+  function isMACAddress(s) {
+    s = (s || "").trim();
+    return /^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/.test(s) ||
+      /^[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}$/.test(s);
+  }
+
+  var protocolBeforeMAC = "auto";
+
+  function syncProtocolFromHost() {
+    var sel = $("protocol");
+    if (isMACAddress($("host").value)) {
+      if (sel.value !== "mac") protocolBeforeMAC = sel.value;
+      sel.value = "mac";
+      sel.disabled = true;
+      sel.title = "MAC-Telnet выбран автоматически, потому что в поле адреса указан MAC-адрес";
+    } else {
+      sel.disabled = false;
+      sel.title = "";
+      if (sel.value === "mac") sel.value = protocolBeforeMAC;
+    }
+  }
+
+  $("host").addEventListener("input", syncProtocolFromHost);
 
   function showError(msg) {
     var box = $("status");
@@ -698,6 +839,7 @@
   function protoLabel(p) {
     if (p === "api") return "RouterOS API";
     if (p === "rest") return "REST API";
+    if (p === "mac") return "MAC-Telnet";
     return p || "—";
   }
 
@@ -828,6 +970,8 @@
 
   function applyInterfaces(list) {
     lastIfaces = list || [];
+    Array.from($("wan-links").children).forEach(function(row) { row.updateMode(); });
+    showWGPubkeys();
     var ethernet = lastIfaces;
     var wifi = lastIfaces.filter(isWifi);
 
@@ -879,10 +1023,89 @@
         $("wifi-path").textContent = f.mode === "wave2" ? "/interface wifi" : "/interface wireless";
         $("wifi-note").textContent = f.mode === "wave2"
           ? "RouterOS 7: будет создан профиль mti-wifi в /interface wifi и применён к интерфейсу."
-          : "Legacy Wi-Fi: профиль mti-wifi не нужен, настройки применяются напрямую к интерфейсу.";
+          : "Legacy Wi-Fi: профиль защиты mti-wifi (WPA2/AES), режим ap-bridge.";
       }
     });
   }
+
+  function updateWANRoles() {
+    Array.from($("wan-links").children).forEach(function(row, index) {
+      row.querySelector("legend").textContent = index ? "Резервный провайдер" : "Основной провайдер";
+      row.querySelector('[data-key="distance"]').value = index + 1;
+    });
+  }
+  $("wan-add").addEventListener("click", function () {
+    if ($("wan-links").children.length >= 2) return;
+    var row = document.createElement("fieldset");
+    row.appendChild(document.createElement("legend"));
+    var grid = document.createElement("div"); grid.className = "grid";
+    [["mode", "Тип подключения", "select"], ["iface", "Интерфейс провайдера", "select"],
+     ["apn", "APN LTE (необязательно; пусто — автоматически)", "text"],
+     ["address", "Статический IPv4/CIDR", "text"], ["gateway", "Шлюз статического канала", "text"],
+     ["distance", "Приоритет (по роли провайдера)", "number"],
+     ["nat", "NAT masquerade", "checkbox"], ["checkGateway", "Ping шлюза (только static)", "checkbox"]].forEach(function (spec) {
+      var label = document.createElement("label"); label.className = "field"; label.textContent = spec[1];
+      var input = document.createElement(spec[2] === "select" ? "select" : "input");
+      if (spec[0] === "mode") [["dhcp","Проводной — DHCP"],["static","Проводной — статический IPv4"],["lte","LTE"]].forEach(function(v) {
+        var o = document.createElement("option"); o.value = v[0]; o.textContent = v[1]; input.appendChild(o);
+      }); else if (spec[2] !== "select") input.type = spec[2];
+      input.dataset.key = spec[0];
+      if (spec[0] === "distance") input.readOnly = true;
+      if (spec[0] === "nat") input.checked = true;
+      label.appendChild(input); grid.appendChild(label);
+    });
+    row.appendChild(grid);
+    row.updateMode = function () {
+      var mode = row.querySelector('[data-key="mode"]').value;
+      var lte = mode === "lte";
+      var candidates = lastIfaces.filter(function(i) {
+        var t = (i.type || "").toLowerCase();
+        return lte ? t === "lte" : t === "ether" || t === "ethernet";
+      });
+      var sel = row.querySelector('[data-key="iface"]');
+      fillSelect(sel, candidates);
+      if (lte && candidates.length) sel.value = sel.value || candidates[0].name;
+      sel.disabled = lte && candidates.length <= 1;
+      ["address", "gateway", "checkGateway", "apn"].forEach(function (key) {
+        var el = row.querySelector('[data-key="' + key + '"]');
+        var active = key === "apn" ? lte : mode === "static";
+        el.disabled = !active; el.parentElement.hidden = !active;
+        if (!active && key === "checkGateway") el.checked = false;
+      });
+    };
+    row.querySelector('[data-key="mode"]').addEventListener("change", row.updateMode); row.updateMode();
+    var remove = document.createElement("button"); remove.type = "button"; remove.className = "ghost"; remove.textContent = "Удалить провайдера";
+    remove.addEventListener("click", function () { row.remove(); updateWANRoles(); schedulePreview(); }); row.appendChild(remove);
+    row.addEventListener("input", schedulePreview); row.addEventListener("change", schedulePreview);
+    $("wan-links").appendChild(row); updateWANRoles(); schedulePreview();
+  });
+
+  $("forward-add").addEventListener("click", function () {
+    if ($("forward-rules").children.length >= 64) return;
+    var row = document.createElement("fieldset");
+    var legend = document.createElement("legend"); legend.textContent = "Правило проброса"; row.appendChild(legend);
+    var grid = document.createElement("div"); grid.className = "grid";
+    [["wan", "WAN-интерфейс (например pppoe-out1)", "text"],
+     ["protocol", "Протокол", "select"], ["externalPort", "Внешний порт", "number"],
+     ["internalIP", "Локальный IPv4 сервера", "text"], ["internalPort", "Порт сервера", "number"],
+     ["publicIP", "Внешний IPv4 (необязательно)", "text"],
+     ["source", "Разрешённый источник IPv4/CIDR (пусто = все)", "text"],
+     ["hairpin", "Hairpin: доступ из LAN по внешнему IP", "checkbox"],
+     ["lan", "Подсеть hairpin, например 192.168.88.0/24", "text"]].forEach(function (spec) {
+      var label = document.createElement("label"); label.className = "field"; label.textContent = spec[1];
+      var input = document.createElement(spec[2] === "select" ? "select" : "input");
+      if (spec[2] === "select") ["tcp", "udp"].forEach(function (v) {
+        var o = document.createElement("option"); o.value = v; o.textContent = v.toUpperCase(); input.appendChild(o);
+      }); else input.type = spec[2];
+      if (spec[2] === "number") { input.min = "1"; input.max = "65535"; }
+      input.dataset.key = spec[0]; label.appendChild(input); grid.appendChild(label);
+    });
+    row.appendChild(grid);
+    var remove = document.createElement("button"); remove.type = "button"; remove.className = "ghost"; remove.textContent = "Удалить правило";
+    remove.addEventListener("click", function () { row.remove(); schedulePreview(); }); row.appendChild(remove);
+    row.addEventListener("input", schedulePreview); row.addEventListener("change", schedulePreview);
+    $("forward-rules").appendChild(row); schedulePreview();
+  });
 
   // ------------------------------------------------------------------
   // сбор настроек
@@ -890,15 +1113,67 @@
   function chk(id) { return $(id).checked; }
   function val(id) { return $(id).value.trim(); }
 
+  // WireGuard настраивается в два прохода. Шаг 1 поднимает интерфейс, а
+  // приватный ключ создаёт сам роутер; шаг 2 добавляет peer по публичному
+  // ключу другой стороны, адресу сервера и сетям туннеля.
+  var WG_PRE = "mti-wg pubkey=";
+
+  function wgStepFields(id) {
+    var peer = $(id + "-step").value === "peer";
+    // Полями шага 1 управляет шаг: адрес и порт нужны только при создании.
+    [["address", !peer], ["listenPort", !peer],
+     ["publicKey", peer], ["allowedIPs", peer],
+     ["endpoint", peer], ["endpointPort", peer]].forEach(function (pair) {
+      var el = $(id + "-" + pair[0]);
+      if (!el) return;
+      el.parentElement.hidden = !pair[1];
+      el.disabled = !pair[1];
+    });
+  }
+
+  function showWGPubkeys() {
+    ["wgServer", "wgClient"].forEach(function (id) {
+      var box = $(id + "-pubkey");
+      if (!box) return;
+      var name = id === "wgServer" ? "mti-wg-server" : "mti-wg-client";
+      var key = "";
+      (lastIfaces || []).forEach(function (i) {
+        if (i.name === name && typeof i.comment === "string" && i.comment.indexOf(WG_PRE) === 0) {
+          key = i.comment.slice(WG_PRE.length).trim();
+        }
+      });
+      box.textContent = key ? "Публичный ключ " + name + ": " + key : "";
+    });
+  }
+
+  ["wgServer", "wgClient"].forEach(function (id) {
+    $(id + "-step").addEventListener("change", function () { wgStepFields(id); schedulePreview(); });
+    wgStepFields(id);
+  });
+
   function collectWG(id) {
-    return {enabled: chk("chk-"+id), privateKey: val(id+"-privateKey"), publicKey: val(id+"-publicKey"), address: val(id+"-address"), allowedIPs: val(id+"-allowedIPs"), listenPort: val(id+"-listenPort"), endpoint: id === "wgClient" ? val(id+"-endpoint") : "", endpointPort: id === "wgClient" ? val(id+"-endpointPort") : ""};
+    return {enabled: chk("chk-"+id), step: $(id+"-step").value, publicKey: val(id+"-publicKey"), address: val(id+"-address"), allowedIPs: val(id+"-allowedIPs"), listenPort: val(id+"-listenPort"), endpoint: id === "wgClient" ? val(id+"-endpoint") : "", endpointPort: id === "wgClient" ? val(id+"-endpointPort") : ""};
   }
   function collectVPN(id) {
     return {enabled: chk("chk-"+id), server: val(id+"-server"), user: val(id+"-user"), password: $(id+"-password").value, port: id === "openvpn" ? val(id+"-port") : "", protocol: id === "openvpn" ? val(id+"-protocol") : "", certificate: id === "openvpn" ? val(id+"-certificate") : "", exitViaVPN: id === "openvpn" && val("openvpn-exit") === "vpn"};
   }
   function collect() {
     return {
-      backup: {enabled: chk("chk-backup"), recipient: val("backup-recipient"), password: $("backup-password").value, time: val("backup-time"), interval: val("backup-interval")},
+      wan: { enabled: chk("chk-wan"), failover: chk("wan-failover"), probeHost: val("wan-probe"), links: Array.from($("wan-links").children).map(function (row) {
+        var link = {};
+        row.querySelectorAll("[data-key]").forEach(function (el) {
+          link[el.dataset.key] = el.type === "checkbox" ? el.checked : el.type === "number" ? Number(el.value) : el.value.trim();
+        });
+        return link;
+      }) },
+      portForward: { enabled: chk("chk-portForward"), rules: Array.from($("forward-rules").children).map(function (row) {
+        var rule = {};
+        row.querySelectorAll("[data-key]").forEach(function (el) {
+          rule[el.dataset.key] = el.type === "checkbox" ? el.checked : el.value.trim();
+        });
+        return rule;
+      }) },
+      backup: {enabled: chk("chk-backup"), recipient: val("backup-recipient"), from: val("backup-from"), smtpServer: val("backup-smtpServer"), smtpPort: val("backup-smtpPort"), smtpUser: val("backup-smtpUser"), smtpPass: $("backup-smtpPass").value, tls: val("backup-tls"), password: $("backup-password").value, time: val("backup-time"), interval: val("backup-interval")},
       geoNat: {enabled: chk("chk-geoNat"), resource: val("geo-id"), wan: val("geo-wan"), destination: val("geo-destination"), port: val("geo-port"), protocol: val("geo-protocol"), countries: selectedGeoCountries(), countryPrefixes: loadedGeoKey === selectedGeoCountries().join(",") ? geoPrefixes : [], manual: $("geo-manual").value, acknowledged: chk("geo-ack")},
       security: {enabled: chk("chk-security"), wan: Array.from($("security-wan").selectedOptions).map(function (o) { return o.value; }), trusted: val("security-trusted"), winboxPort: val("security-port"), acknowledged: chk("security-ack")},
       lan: { enabled: chk("chk-lan"), iface: val("lan-iface"), address: val("lan-addr") },
@@ -1066,12 +1341,20 @@
       data.neighbors.forEach(function(n){
         var row=document.createElement("div"), text=document.createElement("span");
         text.textContent = [n.identity || "MikroTik", n.mac, n.ip || "IP не указан", n.board, n.version].filter(Boolean).join(" · "); row.appendChild(text);
-        if(n.ip){var use=document.createElement("button"); use.type="button"; use.className="ghost"; use.textContent="Выбрать IP"; use.addEventListener("click",function(){ $("host").value=n.ip; }); row.appendChild(use);}
+        if(n.ip){var use=document.createElement("button"); use.type="button"; use.className="ghost"; use.textContent="Выбрать IP"; use.addEventListener("click",function(){ $("host").value=n.ip; syncProtocolFromHost(); }); row.appendChild(use);}
+        if(n.mac){var useMac=document.createElement("button"); useMac.type="button"; useMac.className="ghost"; useMac.textContent="Выбрать MAC"; useMac.addEventListener("click",function(){ $("host").value=n.mac; syncProtocolFromHost(); }); row.appendChild(useMac);}
         box.appendChild(row);
       });
     }).catch(function(e){box.textContent="Ошибка поиска: "+e.message;}).finally(function(){btn.disabled=false;});
   });
-  ["backup-recipient", "backup-password", "backup-time", "backup-interval"].forEach(function(id){ $(id).addEventListener("input",schedulePreview); $(id).addEventListener("change",schedulePreview); });
+  ["backup-recipient", "backup-from", "backup-smtpServer", "backup-smtpPort", "backup-smtpUser", "backup-smtpPass", "backup-password", "backup-time", "backup-interval"].forEach(function(id){ $(id).addEventListener("input",schedulePreview); $(id).addEventListener("change",schedulePreview); });
+  ["backup-tls", "backup-smtpPort", "backup-from", "backup-smtpUser"].forEach(function (id) {
+    $(id).addEventListener("input", updateBackupHint);
+    $(id).addEventListener("change", updateBackupHint);
+  });
+  $("backup-tls").addEventListener("change", schedulePreview);
+  $("backup-log").addEventListener("click", showBackupLog);
+  updateBackupHint();
   FEATURES.forEach(function (id) {
     var sec = document.querySelector('.sec[data-feat="' + id + '"]');
     var head = sec.querySelector(".sec-head");
@@ -1091,7 +1374,7 @@
     });
   });
 
-  ["lan-iface", "lan-addr", "dhcp-iface", "dhcp-start", "dhcp-end", "dhcp-lease",
+  ["wan-failover", "wan-probe", "lan-iface", "lan-addr", "dhcp-iface", "dhcp-start", "dhcp-end", "dhcp-lease",
    "dns-servers", "dns-remote", "ntp-servers", "ntp-tz",
    "pppoe-iface", "pppoe-name", "pppoe-user", "pppoe-pass", "pppoe-service",
    "pppoe-route", "pppoe-dns", "pppoe-nat",
@@ -1181,6 +1464,7 @@
     $("password").value = "";
     $("protocol").value = "auto";
     $("tls").checked = false;
+    syncProtocolFromHost();
     // Обычная отправка формы сохраняет настройки и проходит тот же путь подключения.
     $("go").click();
   });
@@ -1423,8 +1707,13 @@
       .then(function (res) {
         if (!res.ok) throw new Error(res.error || "не удалось применить настройки");
         okBox.style.display = "block";
-        okBox.textContent = "Настройки применены на " + host +
-          " (протокол: " + protoLabel(res.protocol) + ").\nСкрипт " + res.script + " выполнен на роутере.";
+        if (res.protocol === "mac") {
+          okBox.textContent = "Настройки применены на " + host +
+            " (протокол: " + protoLabel(res.protocol) + ").\nКоманды выполнены в терминале роутера по MAC.";
+        } else {
+          okBox.textContent = "Настройки применены на " + host +
+            " (протокол: " + protoLabel(res.protocol) + ").\nСкрипт " + res.script + " выполнен на роутере.";
+        }
         setScriptState("применено", "good");
       })
       .catch(function (e) {

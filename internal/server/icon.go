@@ -6,6 +6,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/binary"
 	"image"
 	"image/color"
 	"image/png"
@@ -179,4 +180,45 @@ func inRoundRect(x, y, rx, ry, w, h, r float64) bool {
 	cy := clamp(y, ry+r, ry+h-r)
 	dx, dy := x-cx, y-cy
 	return dx*dx+dy*dy <= r*r
+}
+
+// IconICO собирает иконку Windows (.ico) из тех же нарисованных PNG, что
+// отдаёт /icon.png. Контейнер ICO с PNG-содержимым поддерживается Windows
+// Vista и новее, поэтому бинарных файлов в репозитории по-прежнему нет:
+// иконка для ярлыков, установщика и области уведомлений получается из
+// одной процедурной отрисовки.
+func IconICO() []byte {
+	sizes := []int{16, 32, 48, 256}
+	images := make([][]byte, len(sizes))
+	for i, s := range sizes {
+		images[i] = IconPNG(s)
+	}
+	total := 0
+	for _, img := range images {
+		total += len(img)
+	}
+	out := make([]byte, 0, 6+16*len(sizes)+total)
+	// ICONDIR: зарезервировано, тип (1 — иконка), число изображений.
+	out = append(out, 0, 0)
+	out = binary.LittleEndian.AppendUint16(out, 1)
+	out = binary.LittleEndian.AppendUint16(out, uint16(len(sizes)))
+	// ICONDIRENTRY по одному на размер, затем сами PNG.
+	offset := uint32(6 + 16*len(sizes))
+	for i, s := range sizes {
+		b := byte(s)
+		if s >= 256 {
+			// В каталоге размер 256 кодируется нулём.
+			b = 0
+		}
+		out = append(out, b, b, 0, 0)
+		out = binary.LittleEndian.AppendUint16(out, 1)
+		out = binary.LittleEndian.AppendUint16(out, 32)
+		out = binary.LittleEndian.AppendUint32(out, uint32(len(images[i])))
+		out = binary.LittleEndian.AppendUint32(out, offset)
+		offset += uint32(len(images[i]))
+	}
+	for _, img := range images {
+		out = append(out, img...)
+	}
+	return out
 }

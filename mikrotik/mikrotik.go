@@ -61,19 +61,26 @@ func (p *Params) normalize() error {
 	if i := strings.IndexByte(h, '/'); i >= 0 {
 		h = h[:i]
 	}
-	// host:port в поле адреса → разбираем, порт из поля адреса имеет приоритет,
-	// только если отдельное поле порта не заполнено.
-	if host, portStr, err := net.SplitHostPort(h); err == nil {
-		if port, err := strconv.Atoi(portStr); err == nil && port > 0 && port <= 65535 {
-			if p.Port == 0 {
-				p.Port = port
+	// MAC-адрес (подключение по MAC без IP) не разбираем как host:port:
+	// иначе последний октет MAC мог бы съесться как номер порта.
+	isMAC := false
+	if _, err := net.ParseMAC(h); err == nil {
+		isMAC = true
+	} else {
+		// host:port в поле адреса → разбираем, порт из поля адреса имеет приоритет,
+		// только если отдельное поле порта не заполнено.
+		if host, portStr, err := net.SplitHostPort(h); err == nil {
+			if port, err := strconv.Atoi(portStr); err == nil && port > 0 && port <= 65535 {
+				if p.Port == 0 {
+					p.Port = port
+				}
+				h = host
 			}
-			h = host
 		}
-	}
-	// IPv6 в квадратных скобках без порта.
-	if strings.HasPrefix(h, "[") && strings.HasSuffix(h, "]") {
-		h = h[1 : len(h)-1]
+		// IPv6 в квадратных скобках без порта.
+		if strings.HasPrefix(h, "[") && strings.HasSuffix(h, "]") {
+			h = h[1 : len(h)-1]
+		}
 	}
 	p.Host = h
 	p.User = strings.TrimSpace(p.User)
@@ -84,12 +91,20 @@ func (p *Params) normalize() error {
 	if p.User == "" {
 		return fmt.Errorf("не указан логин")
 	}
+
+	// MAC-адрес всегда означает подключение по MAC (MAC-Telnet).
+	if isMAC {
+		p.Protocol = "mac"
+	} else if p.Protocol == "mac" {
+		return fmt.Errorf("протокол mac требует MAC-адрес роутера")
+	}
+
 	switch p.Protocol {
 	case "":
 		p.Protocol = "auto"
-	case "auto", "api", "rest":
+	case "auto", "api", "rest", "mac":
 	default:
-		return fmt.Errorf("неизвестный протокол %q (ожидается auto, api или rest)", p.Protocol)
+		return fmt.Errorf("неизвестный протокол %q (ожидается auto, api, rest или mac)", p.Protocol)
 	}
 	return nil
 }
@@ -126,10 +141,14 @@ func restPort(p *Params) int {
 //
 // При Protocol="auto" сначала пробуется RouterOS API, затем REST API;
 // возвращается результат первого успешного варианта, при неудаче —
-// объединённое описание ошибок обоих протоколов.
+// объединённое описание ошибок обоих протоколов. Если в Host указан
+// MAC-адрес, подключение идёт по MAC (MAC-Telnet).
 func Collect(ctx context.Context, p Params) (*Info, error) {
 	if err := p.normalize(); err != nil {
 		return nil, err
+	}
+	if p.Protocol == "mac" {
+		return collectMAC(ctx, &p)
 	}
 	var protocols []string
 	switch p.Protocol {
