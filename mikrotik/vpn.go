@@ -11,6 +11,7 @@ import (
 // WireGuardSettings describes one peer on a new RouterOS WireGuard interface.
 type WireGuardSettings struct {
 	Enabled      bool   `json:"enabled"`
+	Step         string `json:"step"` // "interface" (шаг 1) или "peer" (шаг 2)
 	PrivateKey   string `json:"privateKey"`
 	PublicKey    string `json:"publicKey"`
 	Address      string `json:"address"`
@@ -62,19 +63,33 @@ func validCIDRs(s string) bool {
 func validHost(s string) bool {
 	return net.ParseIP(s) != nil || (len(s) <= 253 && hostRe.MatchString(s))
 }
+// wgStep возвращает шаг настройки WireGuard. Шаг 1 поднимает интерфейс
+// (приватный ключ генерирует сам RouterOS), шаг 2 добавляет peer.
+func wgStep(w WireGuardSettings) string {
+	if strings.EqualFold(w.Step, "peer") {
+		return "peer"
+	}
+	return "interface"
+}
+
+// validateWG проверяет только поля текущего шага: приватный ключ не
+// запрашивается никогда, публичный ключ другой стороны нужен на шаге 2.
 func validateWG(w WireGuardSettings, client bool) []string {
 	var e []string
-	if !validWGKey(w.PrivateKey) || !validWGKey(w.PublicKey) {
-		e = append(e, "WireGuard: укажите корректные приватный ключ устройства и публичный ключ другой стороны (base64, 32 байта)")
+	if wgStep(w) == "interface" {
+		if _, _, err := net.ParseCIDR(w.Address); err != nil {
+			e = append(e, "WireGuard: укажите адрес интерфейса с маской")
+		}
+		if !validPort(w.ListenPort) {
+			e = append(e, "WireGuard: некорректный локальный UDP-порт")
+		}
+		return e
 	}
-	if _, _, err := net.ParseCIDR(w.Address); err != nil {
-		e = append(e, "WireGuard: укажите адрес интерфейса с маской")
+	if !validWGKey(w.PublicKey) {
+		e = append(e, "WireGuard: укажите публичный ключ другой стороны (base64, 32 байта)")
 	}
 	if !validCIDRs(w.AllowedIPs) {
 		e = append(e, "WireGuard: укажите допустимые сети peer в формате CIDR")
-	}
-	if !validPort(w.ListenPort) {
-		e = append(e, "WireGuard: некорректный локальный UDP-порт")
 	}
 	if client && (!validHost(w.Endpoint) || !validPort(w.EndpointPort)) {
 		e = append(e, "WireGuard клиент: укажите адрес и UDP-порт сервера")
@@ -97,21 +112,61 @@ func validateVPNClient(v VPNClientSettings, label string, ovpn bool) []string {
 	}
 	return e
 }
+// writeWG пишет скрипт текущего шага настройки WireGuard: шаг 1 поднимает
+// интерфейс (ключи генерирует RouterOS), шаг 2 добавляет peer.
 func writeWG(b *strings.Builder, w WireGuardSettings, client bool) {
-	name := "mti-wg-server"
+	name, role := "mti-wg-server", "сервер"
 	if client {
-		name = "mti-wg-client"
+		name, role = "mti-wg-client", "клиент"
 	}
-	section(b, "Interface", "WireGuard — "+name)
-	fmt.Fprintf(b, "# Создаётся новый интерфейс; при повторном применении удалите его вручную.\n")
-	fmt.Fprintf(b, "/interface wireguard add %s %s %s\n", attr("name", name), attr("listen-port", w.ListenPort), attr("private-key", w.PrivateKey))
-	fmt.Fprintf(b, "/ip address add %s %s comment=%s\n", attr("address", w.Address), attr("interface", name), name)
-	peer := []string{attr("interface", name), attr("public-key", w.PublicKey), attr("allowed-address", strings.Join(splitList(w.AllowedIPs), ","))}
+	if wgStep(w) == "peer" {
+		writeWGPeer(b, w, name, role, client)
+		return
+	}
+	writeWGInterface(b, w, name, role)
+}
+
+// wgPublicKey — выражение, которое читает публичный ключ интерфейса.
+func wgPublicKey(name string) string {
+	return "[/interface wireguard get [find name=" + rosQuote(name) + "] public-key]"
+}
+
+// writeWGInterface — шаг 1: интерфейс и адрес туннеля. Приватный ключ
+// не передаётся: его создаёт сам RouterOS, а публичный ключ печатается и
+// сохраняется в комментарии интерфейса — оттуда его можно скопировать
+// (в том числе из списка интерфейсов в приложении).
+func writeWGInterface(b *strings.Builder, w WireGuardSettings, name, role string) {
+	section(b, "Interface", "WireGuard — "+role+": шаг 1, интерфейс")
+	b.WriteString("# Шаг 1: приватный ключ создаёт сам RouterOS — вводить его не нужно.\n")
+	b.WriteString("# Публичный ключ появится в выводе скрипта и в комментарии интерфейса.\n")
+	b.WriteString("# Передайте его другой стороне, затем вернитесь и выполните шаг 2.\n")
+	create := "/interface wireguard add " + attr("name", name) + " " + attr("listen-port", w.ListenPort)
+	// Повторное применение не должно ломать уже созданный интерфейс и его ключи.
+	fmt.Fprintf(b, ":if ([:len [/interface wireguard find where name=%s]] = 0) do={ %s } else={ :put %s }\n",
+		rosQuote(name), create, rosQuote("WireGuard: интерфейс "+name+" уже есть, ключ не менялся"))
+	fmt.Fprintf(b, ":if ([:len [/ip address find where interface=%s]] = 0) do={ /ip address add %s %s comment=%s }\n",
+		rosQuote(name), attr("address", w.Address), attr("interface", name), rosQuote(name))
+	key := wgPublicKey(name)
+	fmt.Fprintf(b, "/interface wireguard set [find name=%s] comment=(\"mti-wg pubkey=\" . %s)\n", rosQuote(name), key)
+	fmt.Fprintf(b, ":put (\"WireGuard "+name+" public-key: \" . %s)\n", key)
+	b.WriteString("# Интерфейс поднят. На шаге 2 укажите публичный ключ другой стороны, адрес сервера и сети туннеля.\n")
+	b.WriteString("# Firewall и маршруты к удалённым сетям настраиваются вручную на обеих сторонах.\n")
+}
+
+// writeWGPeer — шаг 2: peer на интерфейсе, созданном на шаге 1. Интерфейс,
+// порт и адрес не вводятся повторно — они берутся из настроек шага 1.
+func writeWGPeer(b *strings.Builder, w WireGuardSettings, name, role string, client bool) {
+	section(b, "Interface", "WireGuard — "+role+": шаг 2, peer")
+	b.WriteString("# Шаг 2: peer добавляется к интерфейсу, созданному на шаге 1.\n")
+	peer := []string{attr("interface", name), attr("public-key", w.PublicKey),
+		attr("allowed-address", strings.Join(splitList(w.AllowedIPs), ","))}
 	if client {
 		peer = append(peer, attr("endpoint-address", w.Endpoint), attr("endpoint-port", w.EndpointPort), "persistent-keepalive=25s")
 	}
-	fmt.Fprintf(b, "/interface wireguard peers add %s\n", strings.Join(peer, " "))
-	b.WriteString("# Настройте firewall и маршруты к удалённым сетям на обеих сторонах вручную.\n")
+	fmt.Fprintf(b, ":if ([:len [/interface wireguard find where name=%s]] = 0) do={ :put %s } else={ /interface wireguard peers add %s }\n",
+		rosQuote(name), rosQuote("WireGuard: сначала выполните шаг 1 — интерфейс "+name+" не найден"), strings.Join(peer, " "))
+	b.WriteString("# Проверьте handshake: /interface wireguard peers print detail\n")
+	b.WriteString("# Firewall и маршруты к удалённым сетям настраиваются вручную на обеих сторонах.\n")
 }
 func writeVPNClient(b *strings.Builder, v VPNClientSettings, ovpn bool) {
 	kind, name := "pptp", "mti-pptp-client"
