@@ -15,19 +15,21 @@ func TestBackupGenerate(t *testing.T) {
 	if !result.OK {
 		t.Fatal(result.Error)
 	}
+	// Значения экранируются дважды: сначала для текста скрипта, затем для
+	// командной строки, в которой этот скрипт создаётся.
 	for _, want := range []string{
 		"mti-backup-schedule", "mti-scheduled.backup", "interval=1d", "02:30:00",
-		"admin@example.com", "router@example.com", "server=$smtpServer",
+		`admin@example.com`, `router@example.com`, `server=\$smtpServer`,
 		"tls=starttls", "policy=ftp,read,write,policy,test,sensitive",
-		`subject=("MikroTik backup: "`, `:log info`,
-		`password=\"strong\\\$pass\\\"word\"`, // двойное экранирование: сначала для скрипта, потом для команды
+		`subject=(\"MikroTik backup: \"`, `:log info`,
+		`password=\"strong\\\$pass\\\"word\"`,
 	} {
 		if !strings.Contains(result.Script, want) {
 			t.Errorf("missing %s", want)
 		}
 	}
 	// Имя сервера разбирается заранее, файл не отправляют до его появления.
-	for _, want := range []string{"[:resolve $smtpServer]", ":delay 10s;", ":if (([:len [/file find where name="} {
+	for _, want := range []string{`[:resolve \$smtpServer]`, ":delay 10s;", ":if (([:len [/file find where name="} {
 		if !strings.Contains(result.Script, want) {
 			t.Errorf("missing %s", want)
 		}
