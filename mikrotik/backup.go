@@ -81,6 +81,16 @@ func eMailTLSParam(rosVersion, mode string) string {
 	return "start-tls=yes"
 }
 
+// rosString — строковый литерал для текста скрипта, всегда в кавычках: имя
+// SMTP-сервера и другие значения безопаснее передавать явной строкой.
+func rosString(v string) string {
+	q := rosQuote(v)
+	if strings.HasPrefix(q, "\"") {
+		return q
+	}
+	return "\"" + v + "\""
+}
+
 func validateBackup(s BackupSettings, rosVersion string) []string {
 	var e []string
 	if a, err := mail.ParseAddress(s.Recipient); err != nil || a.Address != s.Recipient || strings.ContainsAny(s.Recipient, "\r\n") {
@@ -165,7 +175,7 @@ func backupScriptSource(s BackupSettings, rosVersion string) string {
 		`:log info "mti: начинаю создание бэкапа";`,
 		// Имя SMTP-сервера разбираем заранее: /tool e-mail в RouterOS 7 часто
 		// не может разобрать имя сам и письмо просто не уходит.
-		":local smtpServer " + rosQuote(s.SMTPServer) + ";",
+		":local smtpServer " + rosString(s.SMTPServer) + ";",
 		`:do { :set smtpServer [:resolve $smtpServer] } on-error={ :log warning "mti: имя SMTP-сервера не разобрано — отправляю как есть" };`,
 		`:do { /file remove [find where name="` + file + `"] } on-error={ :log warning "mti: старый файл бэкапа не удалён" };`,
 		":do { " + save + ` } on-error={ :log error "mti: /system backup save завершился с ошибкой" };`,

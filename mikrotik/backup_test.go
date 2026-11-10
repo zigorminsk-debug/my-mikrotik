@@ -17,6 +17,10 @@ func TestBackupGenerate(t *testing.T) {
 	}
 	// Значения экранируются дважды: сначала для текста скрипта, затем для
 	// командной строки, в которой этот скрипт создаётся.
+	// Имя SMTP-сервера подставляется в скрипт строкой в кавычках.
+	if !strings.Contains(result.Script, `:local smtpServer \"mail.csl.by\";`) {
+		t.Errorf("имя сервера не в кавычках: %s", result.Script)
+	}
 	for _, want := range []string{
 		"mti-backup-schedule", "mti-scheduled.backup", "interval=1d", "02:30:00",
 		`admin@example.com`, `router@example.com`, `server=\$smtpServer`,
