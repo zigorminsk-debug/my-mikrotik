@@ -17,6 +17,11 @@ type LogEntry struct {
 // читается только для диагностики, весь он не нужен.
 const logDefaultLimit = 200
 
+// logMaxLimit — верхняя граница запрошенного лимита. Больший лимит
+// ограничивается этим значением, а не сбрасывается к значению по умолчанию:
+// иначе запрос «последние 1000 записей» молча возвращал бы 200.
+const logMaxLimit = 1000
+
 // CollectLog возвращает последние записи журнала роутера, в которых встретился
 // filter (без учёта регистра) — в сообщении или в темах. Пустой фильтр
 // возвращает весь журнал, но не больше limit последних записей.
@@ -30,9 +35,7 @@ func CollectLog(ctx context.Context, p Params, filter string, limit int) ([]LogE
 	if p.Protocol == "mac" {
 		return nil, fmt.Errorf("журнал недоступен по MAC-Telnet — подключитесь по API или REST")
 	}
-	if limit <= 0 || limit > 1000 {
-		limit = logDefaultLimit
-	}
+	limit = logLimit(limit)
 	var protocols []string
 	switch p.Protocol {
 	case "api":
@@ -108,6 +111,18 @@ func logREST(ctx context.Context, p *Params, filter string, limit int) ([]LogEnt
 		out = append(out, e)
 	}
 	return filterLog(out, filter, limit), nil
+}
+
+// logLimit приводит запрошенный лимит к допустимому диапазону.
+func logLimit(limit int) int {
+	switch {
+	case limit <= 0:
+		return logDefaultLimit
+	case limit > logMaxLimit:
+		return logMaxLimit
+	default:
+		return limit
+	}
 }
 
 // filterLog оставляет записи, в которых есть filter, и возвращает не более

@@ -54,3 +54,27 @@ func TestSecurityIsAppliedSeparately(t *testing.T) {
 		t.Fatalf("expected independent script: %+v", res)
 	}
 }
+
+// Комментарии правил должны начинаться с mti-sec-: по этому префиксу скрипт
+// проверяет повторное применение и ищет свои правила при расстановке drop.
+func TestSecurityRuleCommentsKeepPrefix(t *testing.T) {
+	dev := &Info{RouterOS: "7.15", Packages: []Package{{Name: "routeros"}}}
+	sec := SecuritySettings{Enabled: true, WAN: []string{"ether1"}, Trusted: "192.168.88.0/24", WinboxPort: "8291", Acknowledged: true}
+	r := Generate(dev, []Iface{{Name: "ether1", Type: "ether"}}, &Settings{Security: sec}, time.Time{})
+	if !r.OK {
+		t.Fatal(r.Error)
+	}
+	if strings.Contains(r.Script, "comment=comment=") {
+		t.Fatal("двойной префикс comment=: правила не найдутся по ^mti-sec-")
+	}
+	for _, want := range []string{
+		"action=accept comment=mti-sec-0-dhcp4",
+		"action=accept comment=mti-sec-0-est4",
+		"action=drop comment=mti-sec-0-drop4",
+		"[find where comment=mti-sec-0-est4]",
+	} {
+		if !strings.Contains(r.Script, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+}
