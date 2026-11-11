@@ -186,7 +186,6 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
-// handleApply применяет сформированный скрипт на роутере.
 // handleLog возвращает записи журнала роутера. Это основной способ понять, как
 // отработал применённый скрипт: вывод команд наружу не передаётся, поэтому
 // скрипты пишут результат в журнал.
@@ -225,6 +224,7 @@ func handleLog(ver string) http.HandlerFunc {
 	}
 }
 
+// handleApply применяет сформированный скрипт на роутере.
 func handleApply(ver string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {

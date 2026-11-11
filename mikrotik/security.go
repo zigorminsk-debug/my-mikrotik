@@ -83,13 +83,19 @@ func writeSecurity(b *strings.Builder, s SecuritySettings, ipv6 bool) {
 		b.WriteString(":if ([:len [/ipv6 firewall filter find where comment~\"^mti-sec-\"]] > 0) do={ :error \"mti IPv6 security rules already exist; stop\" }\n")
 	}
 	// Install exceptions before drops, so an active management session is not interrupted mid-script.
+	//
+	// Комментарий правила формирует attr() — он сам добавляет "comment=".
+	// Дописывать "comment=" в строку формата нельзя: в RouterOS попадёт
+	// значение "comment=mti-sec-…", поиск по регулярному выражению ^mti-sec-
+	// перестанет находить свои же правила, и drop окажется выше
+	// accept-правил — доступ к роутеру пропадёт.
 	rule := func(menu, args, comment string) {
-		fmt.Fprintf(b, "%s add chain=input %s comment=%s\n", menu, args, attr("comment", comment))
-		fmt.Fprintf(b, "%s move [find where comment=%s] destination=0\n", menu, attr("comment", comment))
+		fmt.Fprintf(b, "%s add chain=input %s %s\n", menu, args, attr("comment", comment))
+		fmt.Fprintf(b, "%s move [find where comment=%s] destination=0\n", menu, rosQuote(comment))
 	}
 	drop := func(menu, args, comment string) {
-		fmt.Fprintf(b, "%s add chain=input %s action=drop comment=%s\n", menu, args, attr("comment", comment))
-		fmt.Fprintf(b, "{ :local first [%s find where !(comment~\"^mti-sec-\")]; :if ([:len $first] > 0) do={ %s move [find where comment=%s] destination=[:pick $first 0] } }\n", menu, menu, attr("comment", comment))
+		fmt.Fprintf(b, "%s add chain=input %s action=drop %s\n", menu, args, attr("comment", comment))
+		fmt.Fprintf(b, "{ :local first [%s find where !(comment~\"^mti-sec-\")]; :if ([:len $first] > 0) do={ %s move [find where comment=%s] destination=[:pick $first 0] } }\n", menu, menu, rosQuote(comment))
 	}
 	for n, iface := range s.WAN {
 		prefix := fmt.Sprintf("mti-sec-%d-", n)
