@@ -157,7 +157,10 @@ func TestWANReusesExistingDHCP(t *testing.T) {
 		":if ([:len [/ip dhcp-client find where interface=ether1]] = 0)",
 		"else={ /ip dhcp-client set [find where interface=ether1] add-default-route=yes default-route-distance=1 use-peer-dns=no disabled=no }",
 		":local c [/ip dhcp-client find where interface=ether1]",
-		"/ip dhcp-client set [find where interface=ether1] default-route-distance=",
+		// Резервирование переводит основной канал на управляемый скриптом
+		// статический маршрут: маршрут DHCP-клиента не меняет distance на ходу.
+		"/ip dhcp-client set [find where interface=ether1] add-default-route=no default-route-distance=250",
+		"comment=mti-wan-0",
 	} {
 		if !strings.Contains(res.Script, want) {
 			t.Errorf("missing %s", want)
