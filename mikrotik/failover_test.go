@@ -40,12 +40,9 @@ func TestFailoverGeneration(t *testing.T) {
 			// фактический активный шлюз — по ней видно, почему трафик идёт
 			// не туда, без ручных команд на роутере.
 			`, активный=`, `, маршрутов=`,
-			// Сторож резервного канала: после переподключения модема канал
-			// поднимается сам, без ручного вмешательства.
-			"mti-failover: резервный канал",
-			`gateway~\$bk`, ":local bk ether2;",
-			`/interface set [find name=\$bk] disabled=yes`,
-			`/ip dhcp-client release [find where interface=\$bk]`,
+			// Global state must survive scheduled executions; overlapping runs
+			// must not race the hysteresis timers.
+			"policy=read,write,policy,test", "script job print count-only", "routing-table=main and active",
 		} {
 			if !strings.Contains(res.Script, want) {
 				t.Errorf("%s missing %s", mode, want)
@@ -82,5 +79,82 @@ func TestFailoverValidation(t *testing.T) {
 	s := WANSettings{Failover: true, ProbeHost: "bad", Links: []WANLink{{Mode: "dhcp", Interface: "ether1", Distance: 1}}}
 	if len(validateWAN(s, PPPoESettings{})) < 2 {
 		t.Fatal("single provider and invalid host accepted")
+	}
+}
+
+func TestLTEFailoverLeaseGatewayAndSafety(t *testing.T) {
+	s := Settings{WAN: WANSettings{Enabled: true, Failover: true, Links: []WANLink{
+		{Mode: "lte", Interface: "lte1", Distance: 1},
+		{Mode: "dhcp", Interface: "ether1", Distance: 2},
+	}}}
+	d := deviceWith("routeros")
+	d.RouterOS = "7.22.3"
+	r := Generate(d, []Iface{{Name: "lte1", Type: "lte"}, {Name: "ether1", Type: "ether"}}, &s, time.Time{})
+	if !r.OK {
+		t.Fatal(r.Error)
+	}
+	for _, want := range []string{
+		// Initial handover and subsequent scheduled runs read the bound lease.
+		`:local c [/ip dhcp-client find where interface=lte1]`,
+		`[/ip dhcp-client get $c gateway]`,
+		`:set gwb ($g . "%lte1")`,
+		`\$g . \"%lte1\"`,
+		`[:len \$g] > 0`,
+		`\"bound\"`,
+		`/ip route disable [find where comment=mti-wan-0 and disabled=no]`,
+		`/ip route disable [find where comment=mti-probe-link and disabled=no]`,
+		`:set mtiFailBackup true`,
+		`/interface lte apn set [find where name=mti-wan-0-apn] add-default-route=no`,
+	} {
+		if !strings.Contains(r.Script, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{
+		"172.26.48.63", "/ip dhcp-client release", "disabled=yes } on-error={};\\n:delay 2s",
+		"gateway~\\$bk", "remove [find where dynamic and dst-address=0.0.0.0/0",
+	} {
+		if strings.Contains(r.Script, unwanted) {
+			t.Errorf("unsafe output %q", unwanted)
+		}
+	}
+	stop := strings.Index(r.Script, "/system scheduler remove [find name=mti-failover]")
+	modify := strings.Index(r.Script, "/interface lte apn set [find where name=mti-wan-0-apn] add-default-route=no")
+	if stop < 0 || modify < 0 || stop >= modify {
+		t.Fatal("old scheduler must be stopped before WAN changes")
+	}
+}
+
+func TestFailoverLeaseRecoveryAndShutdown(t *testing.T) {
+	for _, mode := range []string{"dhcp", "lte"} {
+		var b strings.Builder
+		settings := WANSettings{Failover: true, Links: []WANLink{
+			{Mode: mode, Interface: "wan1", Distance: 1},
+			{Mode: "dhcp", Interface: "wan2", Distance: 2},
+		}}
+		buildFailover(&b, settings)
+		s := b.String()
+		for _, want := range []string{
+			`[:len \$c] > 0`, `[/ip dhcp-client get \$c status] = \"bound\"`,
+			`[/ip dhcp-client get \$c gateway]`, `:set gw (\$g . \"%wan1\")`,
+			`:set mtiFailBackup true`, `:set mtiFailBad; :set mtiFailGood;`,
+			`:if (\$routeOK) do={`,
+			`gateway=\$gw routing-table=mti-probe`,
+			`:if ((\$now - \$mtiFailGood >= 1m) && \$mtiFailBackup)`,
+		} {
+			if !strings.Contains(s, want) {
+				t.Errorf("%s: missing %s", mode, want)
+			}
+		}
+		b.Reset()
+		settings.Failover = false
+		buildFailover(&b, settings)
+		s = b.String()
+		if !strings.Contains(s, "add-default-route=yes") || !strings.Contains(s, "/ip route remove [find comment=mti-wan-0]") {
+			t.Errorf("%s: native route is not restored on shutdown", mode)
+		}
+		if strings.Contains(s, "/system scheduler add name=mti-failover") {
+			t.Errorf("%s: scheduler remains enabled", mode)
+		}
 	}
 }

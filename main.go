@@ -21,8 +21,9 @@ import (
 	"github.com/zigorminsk-debug/my-mikrotik/web"
 )
 
-// version подставляется при сборке через -ldflags "-X main.version=...".
-var version = "dev"
+// version подставляется при релизной сборке через -ldflags "-X main.version=...".
+// Эта тестовая версия отличается от последнего опубликованного релиза v0.2.0.
+var version = "0.2.1-test1"
 
 func main() {
 	closeLog := initLogging()

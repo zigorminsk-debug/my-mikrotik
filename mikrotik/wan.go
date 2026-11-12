@@ -101,6 +101,10 @@ func validateWAN(s WANSettings, pppoe PPPoESettings) []string {
 
 func buildWAN(b *strings.Builder, s WANSettings, device *Info, ifaces []Iface) {
 	section(b, "IP / WAN", "Основной и резервный IPv4-каналы")
+	// Stop the previous controller before changing any of its routes or APNs.
+	if device != nil && strings.HasPrefix(device.RouterOS, "7.") {
+		b.WriteString("/system scheduler remove [find name=mti-failover]\n:do { /system script job remove [find where script=mti-failover] } on-error={}\n")
+	}
 	b.WriteString("# Сохраните export/backup. Проверьте существующие DHCP clients, адреса и default routes.\n# Меньшая distance — основной канал. DHCP переключается при потере lease/link.\n# check-gateway=ping проверяет только шлюз, НЕ интернет за ним.\n")
 	for i := 0; i < 2; i++ {
 		tag := fmt.Sprintf("mti-wan-%d", i)

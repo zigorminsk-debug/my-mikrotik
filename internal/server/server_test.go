@@ -278,3 +278,36 @@ func TestServerClosesWhenReadyCallbackFails(t *testing.T) {
 		t.Fatal("listener still active")
 	}
 }
+
+func TestVersionAvailableWithoutRouter(t *testing.T) {
+	srv := newTestServer(t)
+	resp, err := http.Get(srv.URL + "/api/version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Cache-Control"); got != "no-store" {
+		t.Errorf("cache-control = %q", got)
+	}
+	var body struct {
+		OK      bool   `json:"ok"`
+		Version string `json:"version"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.OK || body.Version != "test-1.2.3" {
+		t.Fatalf("unexpected response: %+v", body)
+	}
+	post, err := http.Post(srv.URL+"/api/version", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer post.Body.Close()
+	if post.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("POST status %d", post.StatusCode)
+	}
+}

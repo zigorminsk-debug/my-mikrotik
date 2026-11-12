@@ -1,5 +1,6 @@
 # Артефакты сборки
 /dist/
+/artifacts/
 /windows/app.ico
 *.exe
 *.test

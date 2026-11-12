@@ -54,6 +54,16 @@ func NewMux(opt Options) http.Handler {
 		_, _ = w.Write([]byte(ManifestJSON))
 	})
 
+	// Доступно до подключения к роутеру, чтобы было видно установленную сборку.
+	mux.HandleFunc("/api/version", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, apiResponse{OK: true, Version: ver})
+	})
 	mux.HandleFunc("/api/discovery", handleDiscovery)
 	mux.HandleFunc("/api/info", handleInfo(ver))
 	mux.HandleFunc("/api/interfaces", handleInterfaces(ver))

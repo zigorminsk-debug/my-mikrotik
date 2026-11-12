@@ -219,7 +219,7 @@
 <header>
   <h1>MikroTik Inspector</h1>
   <span class="sub">модель · прошивка · установленные пакеты · конструктор конфигурации</span>
-  <span class="ver" id="appver"></span>
+  <span class="ver" id="appver">Версия: загрузка…</span>
 </header>
 
 <main>
@@ -650,6 +650,15 @@
 (function () {
   "use strict";
   var $ = function (id) { return document.getElementById(id); };
+  function showAppVersion(version) {
+    if (version) $("appver").textContent = "Версия: " + (/^v/i.test(version) ? version : "v" + version);
+  }
+  // Версия приложения видна сразу, даже если роутер ещё не подключён.
+  fetch("/api/version", {cache: "no-store"})
+    .then(function (r) { if (!r.ok) throw new Error("version unavailable"); return r.json(); })
+    .then(function (data) { if (data.version) showAppVersion(data.version); else $("appver").textContent = "Версия недоступна"; })
+    .catch(function () { $("appver").textContent = "Версия недоступна"; });
+
   var lastInfo = null;      // данные об устройстве
   var lastIfaces = [];      // интерфейсы
   var features = {};        // доступность разделов
@@ -1498,7 +1507,7 @@
       .then(function (r) { return r.json().catch(function () { throw new Error("сервер вернул некорректный ответ (HTTP " + r.status + ")"); }); })
       .then(function (data) {
         if (!data.ok) throw new Error(data.error || "неизвестная ошибка");
-        if (data.version) $("appver").textContent = "v" + data.version;
+        if (data.version) showAppVersion(data.version);
         render(data.info);
         initBuilder();
         showTab("build");
