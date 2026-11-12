@@ -17,14 +17,14 @@ jobs:
       - name: Собрать вывод тестов
         run: |
           {
-            echo "== gofmt =="
+            echo "== gofmt -l =="
             gofmt -l . || true
             echo "== gofmt -d =="
-            gofmt -d . 2>&1 | head -80 || true
+            gofmt -d . 2>&1 | head -120 || true
             echo "== vet =="
             go vet ./... 2>&1 || true
             echo "== test =="
-            go test -count=1 ./mikrotik/ -run 'TestFailover|TestWAN' -v 2>&1 || true
+            go test -count=1 ./... 2>&1 | tail -60 || true
             echo "== конец =="
           } > debug-out.txt
       - name: Сохранить вывод в ветку
@@ -33,5 +33,10 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -f debug-out.txt
           git commit -m "debug: вывод тестов" || exit 0
-          git pull --rebase origin "${GITHUB_REF_NAME}"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git fetch origin "${GITHUB_REF_NAME}" || true
+          for i in 1 2 3 4 5; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" || true
+            git push --force origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            sleep 5
+          done
+          exit 1
