@@ -34,18 +34,18 @@ func TestFailoverGeneration(t *testing.T) {
 			"/ip route set [find comment=mti-wan-0] distance=\\$distance",
 			"mti-failover: backup=", "/ip firewall connection remove [find]",
 			// Диагностика: состояние видно в журнале без ручных проверок.
-				"mti-failover: состояние", "mti-failover: переключение не удалось",
-				`:set mtiFailFix (\$mtiFailFix + 1);`, `:local hb 5m; :if (\$replies = 0) do={ :set hb 30s };`,
-				// Строка состояния должна показывать не только счётчики, но и
-				// фактический активный шлюз — по ней видно, почему трафик идёт
-				// не туда, без ручных команд на роутере.
-				`, активный=`, `, маршрутов=`,
-				// Сторож резервного канала: после переподключения модема канал
-				// поднимается сам, без ручного вмешательства.
-				"mti-failover: резервный канал",
-				`gateway~\$bk`, ":local bk ether2;",
-				`/interface set [find name=\$bk] disabled=yes`,
-				`/ip dhcp-client release [find where interface=\$bk]`,
+			"mti-failover: состояние", "mti-failover: переключение не удалось",
+			`:set mtiFailFix (\$mtiFailFix + 1);`, `:local hb 5m; :if (\$replies = 0) do={ :set hb 30s };`,
+			// Строка состояния должна показывать не только счётчики, но и
+			// фактический активный шлюз — по ней видно, почему трафик идёт
+			// не туда, без ручных команд на роутере.
+			`, активный=`, `, маршрутов=`,
+			// Сторож резервного канала: после переподключения модема канал
+			// поднимается сам, без ручного вмешательства.
+			"mti-failover: резервный канал",
+			`gateway~\$bk`, ":local bk ether2;",
+			`/interface set [find name=\$bk] disabled=yes`,
+			`/ip dhcp-client release [find where interface=\$bk]`,
 			} {
 			if !strings.Contains(res.Script, want) {
 				t.Errorf("%s missing %s", mode, want)
