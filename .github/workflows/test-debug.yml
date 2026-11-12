@@ -1,0 +1,34 @@
+name: Test debug
+
+on:
+  push:
+    branches: ["arena/**"]
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Собрать вывод тестов
+        run: |
+          {
+            echo "== gofmt =="
+            gofmt -l .
+            echo "== vet =="
+            go vet ./... 2>&1
+            echo "== test =="
+            go test -count=1 ./mikrotik/ -run 'TestFailover|TestWAN' -v 2>&1
+          } > debug-out.txt
+      - name: Сохранить вывод в ветку
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f debug-out.txt
+          git commit -m "debug: вывод тестов" || exit 0
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
