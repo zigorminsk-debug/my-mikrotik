@@ -68,7 +68,7 @@ func buildFailover(b *strings.Builder, s WANSettings) {
 		} else {
 			restoreCmd = fmt.Sprintf(":do { /interface lte apn set [find where name=mti-wan-0-apn] add-default-route=yes default-route-distance=%d } on-error={}", upDistance)
 		}
-		restoreCmd = restoreCmd + "; :log warning \\"mti-failover: не удалось создать управляемый маршрут — основной канал оставляет свой\\""
+		restoreCmd = restoreCmd + "; :log warning \"mti-failover: не удалось создать управляемый маршрут — основной канал оставляет свой\""
 	}
 
 	// Таблица и метка для пробы.
@@ -85,7 +85,7 @@ func buildFailover(b *strings.Builder, s WANSettings) {
 	// маршрут (шлюз совпадает с полученным от провайдера, поэтому трафик не
 	// прерывается), затем убираем маршрут, установленный DHCP-клиентом.
 	if manageStatic {
-		b.WriteString(":local mtiOk false;\\n")
+		b.WriteString(":local mtiOk false;\n")
 		switch primary.Mode {
 		case "dhcp":
 			fmt.Fprintf(b, ":do { :local gwb [/ip dhcp-client get [find where interface=%s] gateway]; :if ([:len $gwb] > 0) do={ /ip route remove [find comment=mti-wan-0]; /ip route add dst-address=0.0.0.0/0 gateway=($gwb . %s) distance=%d comment=mti-wan-0; :set mtiOk true } } on-error={};\n", rosQuote(primary.Interface), rosQuote("%"+primary.Interface), upDistance)
@@ -99,7 +99,7 @@ func buildFailover(b *strings.Builder, s WANSettings) {
 		fmt.Fprintf(b, ":do { /ip route remove [find where dynamic and dst-address=0.0.0.0/0 and gateway~\"%s\"] } on-error={};\n", rosQuote(primary.Interface))
 		// Страховка: если создать управляемый маршрут не удалось, возвращаем
 		// маршрут самому каналу — пусть без резервирования, но с интернетом.
-		fmt.Fprintf(b, ":if (!$mtiOk) do={ %s }\\n", restoreCmd)
+		fmt.Fprintf(b, ":if (!$mtiOk) do={ %s }\n", restoreCmd)
 	}
 
 	var code strings.Builder
