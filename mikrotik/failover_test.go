@@ -43,7 +43,8 @@ func TestFailoverGeneration(t *testing.T) {
 				// Сторож резервного канала: после переподключения модема канал
 				// поднимается сам, без ручного вмешательства.
 				"mti-failover: резервный канал",
-				`gateway~\$bk`, "/interface set [find name=ether2] disabled=yes",
+				`gateway~\$bk`, ":local bk ether2;",
+				`/interface set [find name=\$bk] disabled=yes`,
 				`/ip dhcp-client release [find where interface=\$bk]`,
 			} {
 			if !strings.Contains(res.Script, want) {
