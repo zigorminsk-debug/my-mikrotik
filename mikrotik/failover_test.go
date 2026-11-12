@@ -46,7 +46,7 @@ func TestFailoverGeneration(t *testing.T) {
 			`gateway~\$bk`, ":local bk ether2;",
 			`/interface set [find name=\$bk] disabled=yes`,
 			`/ip dhcp-client release [find where interface=\$bk]`,
-			} {
+		} {
 			if !strings.Contains(res.Script, want) {
 				t.Errorf("%s missing %s", mode, want)
 			}
