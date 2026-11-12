@@ -98,8 +98,8 @@ jobs:
       - name: Определение версии
         shell: bash
         run: |
-          # Тестовая версия хранится в main.go; git describe выдаёт только
-          # хеш при поверхностном checkout и не совпадает с номером в UI.
+          # Версия хранится в main.go; git describe выдаёт только хеш при
+          # поверхностном checkout и не совпадает с номером в UI.
           VERSION="$(sed -n 's/^var version = "\([^"]*\)"$/\1/p' main.go)"
           test -n "$VERSION"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
@@ -134,13 +134,13 @@ jobs:
         if: matrix.goos == 'windows'
         shell: pwsh
         run: |
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=0.0.0" "/DSourceExe=$PWD\dist\${{ matrix.artifact }}" "/DSetupIcon=$PWD\windows\app.ico" "/DOutputDir=$PWD\dist" windows/setup.iss
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$env:VERSION" "/DSourceExe=$PWD\dist\${{ matrix.artifact }}" "/DSetupIcon=$PWD\windows\app.ico" "/DOutputDir=$PWD\dist" windows/setup.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Проверка установленной программы Windows
         if: matrix.goos == 'windows'
         shell: pwsh
-        run: ./windows/smoke-test.ps1 -Installer "$PWD/dist/mikrotik-inspector-v0.0.0-windows-setup.exe"
+        run: ./windows/smoke-test.ps1 -Installer "$PWD/dist/mikrotik-inspector-v$env:VERSION-windows-setup.exe"
 
       - name: Загрузка артефакта
         uses: actions/upload-artifact@v7

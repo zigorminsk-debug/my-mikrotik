@@ -43,6 +43,11 @@ func TestFailoverGeneration(t *testing.T) {
 			// Global state must survive scheduled executions; overlapping runs
 			// must not race the hysteresis timers.
 			"policy=read,write,policy,test", "script job print count-only", "routing-table=main and active",
+			// Cached desired settings can survive a route replacement. Check the
+			// real gateway and distance even when the cache says they match.
+			`[:tostr [/ip route get [:pick \$r0 0] gateway]] != \$gw`,
+			`[/ip route get [:pick \$r0 0] distance] != \$want`,
+			`[:tostr [/ip route get [:pick \$pr 0] gateway]] != \$gw`,
 		} {
 			if !strings.Contains(res.Script, want) {
 				t.Errorf("%s missing %s", mode, want)
