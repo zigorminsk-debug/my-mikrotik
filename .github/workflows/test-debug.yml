@@ -23,6 +23,7 @@ jobs:
             go vet ./... 2>&1
             echo "== test =="
             go test -count=1 ./mikrotik/ -run 'TestFailover|TestWAN' -v 2>&1
+            echo "== конец =="
           } > debug-out.txt
       - name: Сохранить вывод в ветку
         run: |
