@@ -18,11 +18,11 @@ jobs:
         run: |
           {
             echo "== gofmt =="
-            gofmt -l .
+            gofmt -l . || true
             echo "== vet =="
-            go vet ./... 2>&1
+            go vet ./... 2>&1 || true
             echo "== test =="
-            go test -count=1 ./mikrotik/ -run 'TestFailover|TestWAN' -v 2>&1
+            go test -count=1 ./mikrotik/ -run 'TestFailover|TestWAN' -v 2>&1 || true
             echo "== конец =="
           } > debug-out.txt
       - name: Сохранить вывод в ветку
