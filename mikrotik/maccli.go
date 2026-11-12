@@ -98,20 +98,31 @@ func collectMAC(ctx context.Context, p *Params) (*Info, error) {
 	info := &Info{Protocol: "mac", Packages: []Package{}}
 
 	if recs, err := macPrint(sess, "/system identity"); err == nil && len(recs) > 0 {
-		info.Identity = recs[0]["identity"]
+		info.Identity = recs[0]["name"]
+		if info.Identity == "" {
+			info.Identity = recs[0]["identity"]
+		}
 	}
-	if recs, err := macPrint(sess, "/system resource"); err == nil && len(recs) > 0 {
-		m := recs[0]
-		info.Model = m["board-name"]
-		info.Architecture = m["architecture-name"]
-		info.RouterOS = m["version"]
-		info.Uptime = m["uptime"]
-		info.CPU = m["cpu"]
+	recs, err := macPrint(sess, "/system resource")
+	if err != nil {
+		return nil, fmt.Errorf("чтение /system resource: %w", err)
 	}
+	if len(recs) == 0 || recs[0]["version"] == "" {
+		return nil, fmt.Errorf("не удалось прочитать версию RouterOS через MAC-Telnet")
+	}
+	m := recs[0]
+	info.Model = m["board-name"]
+	info.Architecture = m["architecture-name"]
+	info.RouterOS = m["version"]
+	info.Uptime = m["uptime"]
+	info.CPU = m["cpu"]
 	// /system routerboard есть не на всех устройствах — ошибку игнорируем.
 	if recs, err := macPrint(sess, "/system routerboard"); err == nil && len(recs) > 0 {
 		m := recs[0]
-		info.Board = m["board"]
+		info.Board = m["model"]
+		if info.Board == "" {
+			info.Board = m["board"]
+		}
 		info.CurrentFirmware = m["current-firmware"]
 		if info.CurrentFirmware == "" {
 			info.CurrentFirmware = m["firmware"]
@@ -122,9 +133,10 @@ func collectMAC(ctx context.Context, p *Params) (*Info, error) {
 	if recs, err := macPrint(sess, "/system package"); err == nil {
 		for _, m := range recs {
 			info.Packages = append(info.Packages, Package{
-				Name:    m["name"],
-				Version: m["version"],
-				Status:  m["status"],
+				Name:     m["name"],
+				Version:  m["version"],
+				Status:   m["status"],
+				Disabled: toBool(m["disabled"]),
 			})
 		}
 	}
@@ -154,6 +166,13 @@ func interfacesMAC(ctx context.Context, p *Params) ([]Iface, error) {
 		}
 		out = append(out, iface)
 	}
+	ports, err := macPrint(sess, "/interface bridge port")
+	if err != nil {
+		return nil, fmt.Errorf("чтение портов bridge: %w", err)
+	}
+	if err := addBridgePorts(out, ports); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -167,7 +186,7 @@ func applyMAC(ctx context.Context, p *Params, source string) error {
 	}
 	defer sess.Close()
 
-	for _, line := range strings.Split(source, "\n") {
+	for lineNo, line := range strings.Split(source, "\n") {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -176,7 +195,7 @@ func applyMAC(ctx context.Context, p *Params, source string) error {
 			continue
 		}
 		if _, err := sess.execTerminal(line, 20*time.Second); err != nil {
-			return fmt.Errorf("выполнение %q: %w", line, err)
+			return fmt.Errorf("ошибка выполнения строки %d (настройки могли примениться частично): %w", lineNo+1, err)
 		}
 	}
 	return nil

@@ -18,9 +18,10 @@ const (
 
 // Package — установленный пакет RouterOS.
 type Package struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-	Status  string `json:"status,omitempty"`
+	Name     string `json:"name"`
+	Version  string `json:"version"`
+	Status   string `json:"status,omitempty"`
+	Disabled bool   `json:"disabled,omitempty"`
 }
 
 // Info — информация, полученная с роутера.

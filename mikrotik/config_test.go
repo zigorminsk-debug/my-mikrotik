@@ -50,6 +50,16 @@ func (r *mockRec) contains(sub string) bool {
 // startScriptMock — мок RouterOS API: вход, интерфейсы, операции со скриптами.
 func startScriptMock(t *testing.T) (port int, rec *mockRec, stop func()) {
 	t.Helper()
+	return startScriptMockWithRunError(t, "")
+}
+
+func startScriptMockWithRunError(t *testing.T, runError string) (port int, rec *mockRec, stop func()) {
+	t.Helper()
+	return startScriptMockWithErrors(t, runError, "")
+}
+
+func startScriptMockWithErrors(t *testing.T, runError, bridgeError string) (port int, rec *mockRec, stop func()) {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -85,6 +95,13 @@ func startScriptMock(t *testing.T) (port int, rec *mockRec, stop func()) {
 				_ = writeSentence(conn, "!re", "=name=wlan1", "=type=wireless", "=disabled=true")
 				_ = writeSentence(conn, "!re", "=name=bridge", "=type=bridge", "=disabled=false")
 				_ = writeSentence(conn, "!done")
+			case "/interface/bridge/port/print":
+				if bridgeError != "" {
+					_ = writeSentence(conn, "!trap", "=message="+bridgeError)
+				} else {
+					_ = writeSentence(conn, "!re", "=interface=ether2", "=bridge=bridge")
+				}
+				_ = writeSentence(conn, "!done")
 			case "/system/script/remove":
 				// Роутер отвечает trap, если скрипта нет — клиент должен это игнорировать.
 				_ = writeSentence(conn, "!trap", "=message=no such item")
@@ -92,6 +109,11 @@ func startScriptMock(t *testing.T) (port int, rec *mockRec, stop func()) {
 			case "/system/script/add":
 				_ = writeSentence(conn, "!done")
 			case "/system/script/run":
+				if runError != "" {
+					_ = writeSentence(conn, "!trap", "=message="+runError)
+					_ = writeSentence(conn, "!done")
+					continue
+				}
 				a := attrs(s[1:])
 				if a["number"] == applyScriptName || a["numbers"] == applyScriptName {
 					_ = writeSentence(conn, "!done")
@@ -145,6 +167,10 @@ func startScriptRESTMock(t *testing.T) (port int, rec *mockRec, stop func()) {
 			{"name": "wifi1", "type": "wifi", "disabled": false},
 		})
 	}))
+	mux.HandleFunc("/rest/interface/bridge/port", auth(func(w http.ResponseWriter, r *http.Request) {
+		rec.add("GET /rest/interface/bridge/port")
+		write(w, http.StatusOK, []map[string]any{{"interface": "ether2", "bridge": "bridge"}})
+	}))
 	mux.HandleFunc("/rest/system/script/remove", auth(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		rec.add("POST /rest/system/script/remove " + string(body))
@@ -162,12 +188,12 @@ func startScriptRESTMock(t *testing.T) (port int, rec *mockRec, stop func()) {
 		write(w, http.StatusBadRequest, map[string]string{"message": "expected number"})
 	}))
 	mux.HandleFunc("/rest/system/script", auth(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			write(w, http.StatusMethodNotAllowed, map[string]string{"message": "POST only"})
+		if r.Method != http.MethodPut {
+			write(w, http.StatusMethodNotAllowed, map[string]string{"message": "PUT only"})
 			return
 		}
 		body, _ := io.ReadAll(r.Body)
-		rec.add("POST /rest/system/script " + string(body))
+		rec.add("PUT /rest/system/script " + string(body))
 		write(w, http.StatusOK, []map[string]string{{".id": "*1"}})
 	}))
 	srv := httptest.NewServer(mux)
@@ -512,6 +538,9 @@ func TestCollectInterfacesAPI(t *testing.T) {
 	if list[0].Name != "ether1" || list[0].Type != "ethernet" || list[0].Comment != "WAN" {
 		t.Errorf("ether1: %+v", list[0])
 	}
+	if list[1].Name != "ether2" || list[1].Bridge != "bridge" {
+		t.Errorf("bridge member: %+v", list[1])
+	}
 	var wlan *Iface
 	for i := range list {
 		if list[i].Name == "wlan1" {
@@ -520,6 +549,17 @@ func TestCollectInterfacesAPI(t *testing.T) {
 	}
 	if wlan == nil || !wlan.Disabled {
 		t.Errorf("wlan1: %+v", wlan)
+	}
+}
+
+func TestCollectInterfacesFailsClosedWhenBridgePortsCannotBeRead(t *testing.T) {
+	port, _, stop := startScriptMockWithErrors(t, "", "not permitted")
+	defer stop()
+	_, err := CollectInterfaces(context.Background(), Params{
+		Host: "127.0.0.1", APIPort: port, User: mockUser, Password: mockPassword, Protocol: "api",
+	})
+	if err == nil || !strings.Contains(err.Error(), "портов bridge") {
+		t.Fatalf("missing bridge read error: %v", err)
 	}
 }
 
@@ -535,6 +575,56 @@ func TestCollectInterfacesREST(t *testing.T) {
 	}
 	if len(list) != 3 || list[2].Name != "wifi1" || list[2].Type != "wifi" {
 		t.Errorf("list = %+v", list)
+	}
+	if len(list) > 1 && list[1].Bridge != "bridge" {
+		t.Errorf("bridge member: %+v", list[1])
+	}
+}
+
+func TestRejectBridgeMembersForL3(t *testing.T) {
+	device := deviceWith("routeros")
+	ifaces := []Iface{{Name: "ether1", Type: "ethernet", Bridge: "bridge"}, {Name: "ether2", Type: "ethernet", Bridge: "bridge"}, {Name: "bridge", Type: "bridge"}}
+	cases := []struct {
+		name string
+		s    Settings
+	}{
+		{"address", Settings{LAN: LanSettings{Enabled: true, Interface: "ether2", Address: "192.168.88.1/24"}}},
+		{"server", Settings{LAN: LanSettings{Enabled: true, Interface: "bridge", Address: "192.168.88.1/24"}, DHCP: DHCPSettings{Enabled: true, Interface: "ether2", LeaseTime: "1d"}}},
+		{"wan", Settings{WAN: WANSettings{Enabled: true, Links: []WANLink{{Interface: "ether1", Mode: "dhcp", Distance: 1}}}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := Generate(device, ifaces, &tc.s, testTime())
+			if r.OK || !strings.Contains(r.Error, "входит в bridge") {
+				t.Fatalf("bridge member accepted: %+v", r)
+			}
+		})
+	}
+	good := Settings{LAN: LanSettings{Enabled: true, Interface: "bridge", Address: "192.168.88.1/24"}, DHCP: DHCPSettings{Enabled: true, Interface: "bridge", LeaseTime: "1d"}}
+	if r := Generate(device, ifaces, &good, testTime()); !r.OK {
+		t.Fatalf("bridge L3 should be accepted: %s", r.Error)
+	}
+}
+
+func TestDisabledPackageIsNotAvailable(t *testing.T) {
+	dev := &Info{RouterOS: "6.49", Packages: []Package{{Name: "system"}, {Name: "dhcp", Disabled: true}}}
+	for _, f := range AnalyzeFeatures(dev, nil) {
+		if f.ID == "dhcp" && f.Available {
+			t.Fatal("disabled DHCP package exposed as available")
+		}
+	}
+}
+
+func TestWiFiSpecificPackageTakesPrecedence(t *testing.T) {
+	ok, name := hasWiFiPackage(map[string]bool{"routeros": true, "wifi-qcom-ac": true}, true)
+	if !ok || name != "wifi-qcom-ac" {
+		t.Fatalf("specific WiFi package lost: %v %s", ok, name)
+	}
+}
+
+func TestBridgePortIncompleteDataIsRejected(t *testing.T) {
+	if err := addBridgePorts([]Iface{{Name: "ether2"}}, []map[string]string{{"interface": "ether2"}}); err == nil {
+		t.Fatal("incomplete topology accepted")
 	}
 }
 
@@ -562,6 +652,27 @@ func TestApplyAPI(t *testing.T) {
 	}
 	if !rec.contains("/system/script/run | =number=" + applyScriptName) {
 		t.Errorf("run не записан: %+v", rec.cmds)
+	}
+}
+
+func TestApplyRunErrorDoesNotRetryOrFallBack(t *testing.T) {
+	apiPort, apiRec, stopAPI := startScriptMockWithRunError(t, "failure: can not run on slave interface")
+	defer stopAPI()
+	restPort, restRec, stopREST := startScriptRESTMock(t)
+	defer stopREST()
+
+	_, err := ApplyScript(context.Background(), Params{
+		Host: "127.0.0.1", APIPort: apiPort, RESTPort: restPort,
+		User: mockUser, Password: mockPassword, Protocol: "auto",
+	}, "/log info test")
+	if err == nil || !strings.Contains(err.Error(), "can not run on slave interface") || !strings.Contains(err.Error(), "частично") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if apiRec.contains("/system/script/run | =numbers=") {
+		t.Fatal("execution retried with numbers after script error")
+	}
+	if restRec.contains("/rest/system/script") {
+		t.Fatal("execution attempted again over REST after script error")
 	}
 }
 

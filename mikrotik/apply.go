@@ -2,6 +2,7 @@ package mikrotik
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -13,6 +14,13 @@ const applyScriptName = "mti-apply"
 const applyScriptPolicy = "ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon"
 
 const maxScriptSize = 64 << 10 // 64 КБ
+
+// After a script creation/run attempt the router's state may have changed,
+// including when the response is lost. Never replay through another protocol.
+type applyAttemptError struct{ err error }
+
+func (e *applyAttemptError) Error() string { return e.err.Error() }
+func (e *applyAttemptError) Unwrap() error { return e.err }
 
 // ApplyScript применяет сформированный скрипт на роутере: создаёт его как
 // /system/script и выполняет — в точности то же, что сделал бы пользователь,
@@ -65,6 +73,10 @@ func ApplyScript(ctx context.Context, p Params, source string) (string, error) {
 			return proto, nil
 		}
 		errs = append(errs, fmt.Sprintf("%s: %s", proto, err))
+		var attempted *applyAttemptError
+		if errors.As(err, &attempted) {
+			break
+		}
 	}
 	return "", fmt.Errorf("%s", strings.Join(errs, "; "))
 }
@@ -98,22 +110,18 @@ func applyAPI(ctx context.Context, p *Params, source string) error {
 		"=source="+source,
 		"=policy="+applyScriptPolicy,
 	); err != nil {
-		return fmt.Errorf("не удалось создать скрипт: %w", err)
+		return &applyAttemptError{fmt.Errorf("не удалось создать скрипт: %w", err)}
 	}
 
-	// Аргумент команды run называется number (проверено по /console/inspect);
-	// numbers — запасной вариант на случай других версий RouterOS.
-	_, _, runErr := c.exec("/system/script/run", "=number="+applyScriptName)
-	if runErr != nil {
-		_, _, altErr := c.exec("/system/script/run", "=numbers="+applyScriptName)
-		if altErr != nil {
-			return fmt.Errorf("не удалось выполнить скрипт: %v; запасной вариант: %v", runErr, altErr)
-		}
+	// An execution error can mean that earlier commands already ran. Retrying
+	// with another parameter or transport could repeat destructive changes.
+	if _, _, err := c.exec("/system/script/run", "=number="+applyScriptName); err != nil {
+		return &applyAttemptError{fmt.Errorf("не удалось выполнить скрипт (настройки могли примениться частично): %w", err)}
 	}
 	return nil
 }
 
-// applyREST: POST /rest/system/script/{remove,add,run}.
+// applyREST: remove, PUT to create the script, then POST run.
 func applyREST(ctx context.Context, p *Params, source string) error {
 	rc, err := newRESTClient(p)
 	if err != nil {
@@ -132,7 +140,7 @@ func applyREST(ctx context.Context, p *Params, source string) error {
 	}
 	_, _ = rc.post(ctx, "/rest/system/script/remove", map[string]any{"numbers": applyScriptName})
 
-	if _, err := rc.post(ctx, "/rest/system/script", map[string]any{
+	if _, err := rc.put(ctx, "/rest/system/script", map[string]any{
 		"name":   applyScriptName,
 		"source": source,
 		"policy": applyScriptPolicy,
@@ -144,7 +152,7 @@ func applyREST(ctx context.Context, p *Params, source string) error {
 	if _, err := rc.post(ctx, "/rest/system/script/run", map[string]any{
 		"number": applyScriptName,
 	}); err != nil {
-		return fmt.Errorf("не удалось выполнить скрипт: %w", err)
+		return &applyAttemptError{fmt.Errorf("не удалось выполнить скрипт (настройки могли примениться частично): %w", err)}
 	}
 	return nil
 }

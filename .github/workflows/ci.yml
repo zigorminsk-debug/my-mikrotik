@@ -35,6 +35,9 @@ jobs:
             exit 1
           fi
 
+      - name: Проверка защит интерфейса
+        run: node web/ui.test.cjs
+
       - name: go vet
         run: go vet ./...
 

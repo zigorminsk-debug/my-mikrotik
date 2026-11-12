@@ -170,7 +170,7 @@ func startMockAPI(t *testing.T, challenge bool) (port int, stop func()) {
 					_ = writeSentence(conn, "!done")
 				}
 			case "/system/identity/print":
-				_ = writeSentence(conn, "!re", "=identity="+mockIdentity)
+				_ = writeSentence(conn, "!re", "=name="+mockIdentity)
 				_ = writeSentence(conn, "!done")
 			case "/system/resource/print":
 				_ = writeSentence(conn, "!re",
@@ -182,7 +182,7 @@ func startMockAPI(t *testing.T, challenge bool) (port int, stop func()) {
 				_ = writeSentence(conn, "!done")
 			case "/system/routerboard/print":
 				_ = writeSentence(conn, "!re",
-					"=board=RB750Gr3",
+					"=model=RB750Gr3",
 					"=current-firmware=7.15.3",
 					"=factory-firmware=7.15.3",
 					"=upgrade-firmware=7.16")
@@ -325,7 +325,7 @@ func startMockREST(t *testing.T) (port int, stop func()) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/rest/system/identity", auth(func(w http.ResponseWriter, r *http.Request) {
-		write(w, []map[string]any{{"identity": mockIdentity}})
+		write(w, []map[string]any{{"name": mockIdentity}})
 	}))
 	mux.HandleFunc("/rest/system/resource", auth(func(w http.ResponseWriter, r *http.Request) {
 		write(w, []map[string]any{{
@@ -338,7 +338,7 @@ func startMockREST(t *testing.T) (port int, stop func()) {
 	}))
 	mux.HandleFunc("/rest/system/routerboard", auth(func(w http.ResponseWriter, r *http.Request) {
 		write(w, []map[string]any{{
-			"board":            "RB750Gr3",
+			"model":            "RB750Gr3",
 			"current-firmware": "7.15.3",
 			"factory-firmware": "7.15.3",
 			"upgrade-firmware": "7.16",

@@ -13,6 +13,7 @@ type Iface struct {
 	Comment  string `json:"comment,omitempty"`
 	MAC      string `json:"mac,omitempty"`
 	Disabled bool   `json:"disabled"`
+	Bridge   string `json:"bridge,omitempty"` // configured bridge membership, including disabled ports
 }
 
 // toBool разбирает булевы значения RouterOS ("true"/"false"/"yes"/"no"/JSON bool).
@@ -42,6 +43,36 @@ func ifaceFromAttrs(m map[string]string) Iface {
 		MAC:      m["mac-address"],
 		Disabled: m["disabled"] == "true" || m["disabled"] == "yes" || m["disabled"] == "1",
 	}
+}
+
+// addBridgePorts annotates physical/logical members before the constructor
+// chooses an L3 interface. A disabled bridge port is still treated as a
+// member, since it may be enabled without regenerating the configuration.
+func addBridgePorts(ifaces []Iface, ports []map[string]string) error {
+	byName := make(map[string]string, len(ports))
+	for _, port := range ports {
+		name, bridge := port["interface"], port["bridge"]
+		if name == "" || bridge == "" {
+			return fmt.Errorf("неполные данные о портах bridge")
+		}
+		if previous := byName[name]; previous != "" && previous != bridge {
+			return fmt.Errorf("интерфейс %s указан в нескольких bridge", name)
+		}
+		byName[name] = bridge
+	}
+	for i := range ifaces {
+		ifaces[i].Bridge = byName[ifaces[i].Name]
+	}
+	return nil
+}
+
+func bridgeMemberError(ifaces []Iface, name, context string) string {
+	for _, iface := range ifaces {
+		if iface.Name == name && iface.Bridge != "" {
+			return fmt.Sprintf("%s: интерфейс %s входит в bridge %s; выберите подходящий интерфейс уровня IP или измените состав bridge вручную", context, name, iface.Bridge)
+		}
+	}
+	return ""
 }
 
 // CollectInterfaces возвращает список интерфейсов роутера.
@@ -107,6 +138,13 @@ func interfacesAPI(ctx context.Context, p *Params) ([]Iface, error) {
 		}
 		out = append(out, iface)
 	}
+	ports, _, err := c.exec("/interface/bridge/port/print")
+	if err != nil {
+		return nil, fmt.Errorf("чтение портов bridge: %w", err)
+	}
+	if err := addBridgePorts(out, ports); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -132,6 +170,17 @@ func interfacesREST(ctx context.Context, p *Params) ([]Iface, error) {
 			continue
 		}
 		out = append(out, iface)
+	}
+	ports, err := rc.get(ctx, "/rest/interface/bridge/port")
+	if err != nil {
+		return nil, fmt.Errorf("чтение портов bridge: %w", err)
+	}
+	bridgePorts := make([]map[string]string, 0, len(ports))
+	for _, port := range ports {
+		bridgePorts = append(bridgePorts, map[string]string{"interface": jstr(port, "interface"), "bridge": jstr(port, "bridge")})
+	}
+	if err := addBridgePorts(out, bridgePorts); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

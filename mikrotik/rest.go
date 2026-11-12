@@ -127,12 +127,18 @@ func collectREST(ctx context.Context, p *Params) (*Info, error) {
 	}
 	info := &Info{Protocol: "rest", Packages: []Package{}}
 	if len(ident) > 0 {
-		info.Identity = jstr(ident[0], "identity")
+		info.Identity = jstr(ident[0], "name")
+		if info.Identity == "" {
+			info.Identity = jstr(ident[0], "identity")
+		}
 	}
 
 	res, err := rc.get(ctx, "/rest/system/resource")
 	if err != nil {
 		return nil, err
+	}
+	if len(res) == 0 || jstr(res[0], "version") == "" {
+		return nil, fmt.Errorf("не удалось прочитать версию RouterOS из /system/resource")
 	}
 	if len(res) > 0 {
 		m := res[0]
@@ -146,7 +152,10 @@ func collectREST(ctx context.Context, p *Params) (*Info, error) {
 	// /rest/system/routerboard есть не на всех устройствах — ошибку игнорируем.
 	if rb, err := rc.get(ctx, "/rest/system/routerboard"); err == nil && len(rb) > 0 {
 		m := rb[0]
-		info.Board = jstr(m, "board")
+		info.Board = jstr(m, "model")
+		if info.Board == "" {
+			info.Board = jstr(m, "board")
+		}
 		info.CurrentFirmware = jstr(m, "current-firmware")
 		if info.CurrentFirmware == "" {
 			info.CurrentFirmware = jstr(m, "firmware")
@@ -161,9 +170,10 @@ func collectREST(ctx context.Context, p *Params) (*Info, error) {
 	}
 	for _, m := range pkgs {
 		info.Packages = append(info.Packages, Package{
-			Name:    jstr(m, "name"),
-			Version: jstr(m, "version"),
-			Status:  jstr(m, "status"),
+			Name:     jstr(m, "name"),
+			Version:  jstr(m, "version"),
+			Status:   jstr(m, "status"),
+			Disabled: toBool(m["disabled"]),
 		})
 	}
 
@@ -176,11 +186,19 @@ func collectREST(ctx context.Context, p *Params) (*Info, error) {
 // post выполняет POST-запрос с JSON-телом и возвращает тело ответа.
 // Ошибки HTTP-статусов (кроме 2xx) превращаются в error с сообщением роутера.
 func (rc *restClient) post(ctx context.Context, path string, body any) ([]byte, error) {
+	return rc.send(ctx, http.MethodPost, path, body)
+}
+
+func (rc *restClient) put(ctx context.Context, path string, body any) ([]byte, error) {
+	return rc.send(ctx, http.MethodPut, path, body)
+}
+
+func (rc *restClient) send(ctx context.Context, method, path string, body any) ([]byte, error) {
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rc.base+path, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, method, rc.base+path, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}

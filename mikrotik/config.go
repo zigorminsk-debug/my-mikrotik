@@ -148,7 +148,9 @@ func packageSet(device *Info) map[string]bool {
 		return set
 	}
 	for _, p := range device.Packages {
-		set[strings.ToLower(strings.TrimSpace(p.Name))] = true
+		if !p.Disabled {
+			set[strings.ToLower(strings.TrimSpace(p.Name))] = true
+		}
 	}
 	return set
 }
@@ -165,13 +167,13 @@ func isCombinedPackage(name string) bool {
 // RouterOS 6 — wireless; RouterOS 7 — wifiwave2 / wifi-qcom / wifi-qcom-ac / wifi;
 // объединённый routeros содержит поддержку для моделей с радио.
 func hasWiFiPackage(pkgs map[string]bool, combined bool) (bool, string) {
-	if combined {
-		return true, "routeros"
-	}
 	for _, name := range []string{"wifiwave2", "wifi-qcom-ac", "wifi-qcom", "wifi", "wireless"} {
 		if pkgs[name] {
 			return true, name
 		}
+	}
+	if combined {
+		return true, "routeros"
 	}
 	return false, ""
 }
@@ -618,6 +620,26 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 	}
 	if s.PortForward.Enabled && avail["portForward"] {
 		errs = append(errs, validatePortForward(s.PortForward)...)
+	}
+
+	// A bridge member is not a safe L3 attachment for IP or DHCP. Never
+	// remove it from the bridge automatically; that could cut off management.
+	if s.LAN.Enabled && avail[featLAN] {
+		if e := bridgeMemberError(ifaces, strings.TrimSpace(s.LAN.Interface), "Адреса"); e != "" {
+			errs = append(errs, e)
+		}
+	}
+	if s.DHCP.Enabled && avail[featDHCP] {
+		if e := bridgeMemberError(ifaces, dhcpIface(s), "DHCP-сервер"); e != "" {
+			errs = append(errs, e)
+		}
+	}
+	if s.WAN.Enabled && avail["wan"] {
+		for i, link := range s.WAN.Links {
+			if e := bridgeMemberError(ifaces, link.Interface, fmt.Sprintf("WAN, канал %d", i+1)); e != "" {
+				errs = append(errs, e)
+			}
+		}
 	}
 
 	// --- вычисления ---

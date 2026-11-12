@@ -558,7 +558,29 @@ func (s *macSession) execTerminal(cmd string, timeout time.Duration) (string, er
 		return "", err
 	}
 	out := s.readUntilPrompt(timeout, 2)
-	return cleanTerminalOutput(out, cmd), nil
+	if strings.Count(out, "] >") < 2 {
+		return "", fmt.Errorf("нет подтверждения завершения команды MAC-Telnet; состояние роутера неизвестно")
+	}
+	clean := cleanTerminalOutput(out, cmd)
+	if err := terminalCommandError(clean); err != nil {
+		return "", err
+	}
+	return clean, nil
+}
+
+// CLI errors are ordinary text, not transport failures. Do not report a
+// successful apply or interpret an error as an empty bridge membership list.
+func terminalCommandError(out string) error {
+	for _, line := range strings.Split(out, "\n") {
+		text := strings.TrimSpace(line)
+		lower := strings.ToLower(text)
+		for _, prefix := range []string{"failure:", "syntax error", "bad command name", "expected end of command", "input does not match", "not enough permissions", "no such item"} {
+			if strings.HasPrefix(lower, prefix) {
+				return fmt.Errorf("ошибка терминала RouterOS: %s", text)
+			}
+		}
+	}
+	return nil
 }
 
 // cleanTerminalOutput вырезает из вывода терминала эхо команды и промпт,

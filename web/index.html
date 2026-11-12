@@ -665,22 +665,24 @@
   var currentScript = "";   // актуальный скрипт
   var previewTimer = null;
   var previewSeq = 0;
+  var connectedKey = null;  // bound to all connection fields, including the password; never persisted
+  var interfacesReady = false;
+  var interfaceSeq = 0;
 
   var LABELS = [
     ["identity", "Идентификатор"],
-    ["model", "Модель"],
-    ["board", "Плата"],
-    ["routeros", "Версия RouterOS (прошивка)"],
-    ["currentFirmware", "Текущая прошивка"],
-    ["factoryFirmware", "Заводская прошивка"],
-    ["upgradeFirmware", "Доступна прошивка"],
+    ["model", "Модель (RouterOS)"],
+    ["board", "Модель RouterBOARD"],
+    ["routeros", "Версия RouterOS"],
+    ["currentFirmware", "Текущий RouterBOOT"],
+    ["factoryFirmware", "Заводской RouterBOOT"],
+    ["upgradeFirmware", "Доступен RouterBOOT"],
     ["architecture", "Архитектура"],
     ["cpu", "Процессор"],
     ["uptime", "Аптайм"]
   ];
 
   var FEATURES = ["backup", "lan", "dhcp", "dns", "ntp", "pppoe", "wifi", "portForward", "wan", "wgServer", "wgClient", "openvpn", "pptp", "ovpnCertificates", "security", "geoNat"];
-  var DEFAULT_ON = ["lan", "dhcp"];
   var DEFAULTS = { "dns-remote": true, "pppoe-route": true, "pppoe-dns": true, "pppoe-nat": true };
 
   // ------------------------------------------------------------------
@@ -754,6 +756,7 @@
     btn.textContent = "Читаем журнал…";
     out.hidden = true;
     var payload = connPayload();
+    payload.protocol = lastInfo.protocol || payload.protocol;
     payload.filter = "mti";
     payload.limit = 200;
     fetch("/api/log", {
@@ -792,6 +795,31 @@
       protocol: $("protocol").value
     };
   }
+
+  function connectionKey() { return JSON.stringify(connPayload()); }
+
+  function invalidateConnection() {
+    if (!lastInfo && connectedKey === null) return;
+    if (connectedKey !== null && connectedKey === connectionKey()) return;
+    connectedKey = null;
+    interfacesReady = false;
+    lastInfo = null;
+    lastIfaces = [];
+    currentScript = "";
+    clearTimeout(previewTimer);
+    previewSeq++;
+    setActions(false);
+    $("build-body").style.display = "none";
+    $("build-need-conn").style.display = "";
+    $("result").classList.remove("show");
+    $("copy").style.display = "none";
+    showError("Параметры подключения изменились. Подключитесь заново перед настройкой устройства.");
+  }
+
+  ["host", "port", "user", "password", "protocol", "tls"].forEach(function (id) {
+    $(id).addEventListener("input", invalidateConnection);
+    $(id).addEventListener("change", invalidateConnection);
+  });
 
   // MAC-адрес в поле адреса означает подключение по MAC (MAC-Telnet) —
   // как в WinBox: протокол выбирается автоматически, без ручного выбора.
@@ -934,7 +962,7 @@
     items.forEach(function (i) {
       var o = document.createElement("option");
       o.value = i.name;
-      o.textContent = i.name + ifaceTypeLabel(i) + (i.disabled ? " · выключен" : "");
+      o.textContent = i.name + ifaceTypeLabel(i) + (i.bridge ? " · порт " + i.bridge : "") + (i.disabled ? " · выключен" : "");
       sel.appendChild(o);
     });
     var pick = prev;
@@ -958,15 +986,19 @@
   }
 
   function preferEther(items) {
-    var list = items.filter(function (i) { return !isWifi(i) && (i.type || "") !== "bridge"; });
-    if (!list.length) list = items;
+    var list = items.filter(function (i) { return !i.disabled && !i.bridge && !isWifi(i) && (i.type || "").toLowerCase() !== "bridge"; });
     for (var i = 0; i < list.length; i++) if (list[i].name === "ether1") return "ether1";
     return list[0] ? list[0].name : "";
   }
 
   function preferLan(items) {
-    var list = items.filter(function (i) { return !isWifi(i) && (i.type || "") !== "bridge"; });
-    if (!list.length) list = items;
+    var bridges = items.filter(function (i) { return !i.disabled && !i.bridge && (i.type || "").toLowerCase() === "bridge"; });
+    if (bridges.length === 1) return bridges[0].name;
+    if (bridges.length > 1) return ""; // ambiguous: require an explicit choice
+    var list = items.filter(function (i) {
+      var t = (i.type || "").toLowerCase();
+      return !i.disabled && !i.bridge && (t === "ether" || t === "ethernet");
+    });
     for (var i = 0; i < list.length; i++) if (list[i].name === "ether2") return "ether2";
     if (list.length > 1) return list[1].name;
     return list[0] ? list[0].name : "";
@@ -1233,7 +1265,7 @@
   }
 
   function preview() {
-    if (!lastInfo) return;
+    if (!lastInfo || !interfacesReady || connectedKey !== connectionKey()) return;
     var seq = ++previewSeq;
     var payload = { device: lastInfo, interfaces: lastIfaces, settings: collect() };
 
@@ -1350,8 +1382,8 @@
       data.neighbors.forEach(function(n){
         var row=document.createElement("div"), text=document.createElement("span");
         text.textContent = [n.identity || "MikroTik", n.mac, n.ip || "IP не указан", n.board, n.version].filter(Boolean).join(" · "); row.appendChild(text);
-        if(n.ip){var use=document.createElement("button"); use.type="button"; use.className="ghost"; use.textContent="Выбрать IP"; use.addEventListener("click",function(){ $("host").value=n.ip; syncProtocolFromHost(); }); row.appendChild(use);}
-        if(n.mac){var useMac=document.createElement("button"); useMac.type="button"; useMac.className="ghost"; useMac.textContent="Выбрать MAC"; useMac.addEventListener("click",function(){ $("host").value=n.mac; syncProtocolFromHost(); }); row.appendChild(useMac);}
+        if(n.ip){var use=document.createElement("button"); use.type="button"; use.className="ghost"; use.textContent="Выбрать IP"; use.addEventListener("click",function(){ $("host").value=n.ip; syncProtocolFromHost(); invalidateConnection(); }); row.appendChild(use);}
+        if(n.mac){var useMac=document.createElement("button"); useMac.type="button"; useMac.className="ghost"; useMac.textContent="Выбрать MAC"; useMac.addEventListener("click",function(){ $("host").value=n.mac; syncProtocolFromHost(); invalidateConnection(); }); row.appendChild(useMac);}
         box.appendChild(row);
       });
     }).catch(function(e){box.textContent="Ошибка поиска: "+e.message;}).finally(function(){btn.disabled=false;});
@@ -1426,7 +1458,16 @@
   // ------------------------------------------------------------------
   function loadInterfaces() {
     var device = lastInfo;
+    var key = connectedKey;
+    var seq = ++interfaceSeq;
+    interfacesReady = false;
+    currentScript = "";
+    clearTimeout(previewTimer);
+    previewSeq++;
+    setActions(false);
     var payload = connPayload();
+    // Keep using the transport that actually returned this device's identity.
+    payload.protocol = device.protocol || payload.protocol;
     payload.device = lastInfo;
     return fetch("/api/interfaces", {
       method: "POST",
@@ -1435,14 +1476,17 @@
     })
       .then(function (r) { return r.json(); })
       .then(function (res) {
-        if (lastInfo !== device) return;
+        if (seq !== interfaceSeq || lastInfo !== device || connectedKey !== key || connectionKey() !== key) return;
         if (!res.ok) throw new Error(res.error || "не удалось прочитать интерфейсы");
         applyInterfaces(res.interfaces || []);
         applyFeatures(res.features);
+        interfacesReady = true;
         if (res.features) preview();
       })
       .catch(function (e) {
-        if (lastInfo !== device) return;
+        if (seq !== interfaceSeq || lastInfo !== device || connectedKey !== key) return;
+        lastIfaces = [];
+        interfacesReady = false;
         $("devline").textContent = "интерфейсы не прочитаны: " + (e.message || e);
       });
   }
@@ -1453,14 +1497,13 @@
     var info = lastInfo || {};
     $("devline").textContent = (info.model || "устройство") + " · RouterOS " + (info.routeros || "—");
     $("wifi-country").value = "BY";
-    // начальное состояние: включены LAN и DHCP, если они доступны
-    DEFAULT_ON.forEach(function (id) {
+    // Never silently enable sections on a newly connected router. A previous
+    // device may have had different LAN, credentials and interface roles.
+    FEATURES.forEach(function (id) {
       var sec = document.querySelector('.sec[data-feat="' + id + '"]');
       var chkbox = sec.querySelector("input[type=checkbox]");
-      if (!chkbox.disabled) {
-        chkbox.checked = true;
-        sec.classList.add("on");
-      }
+      chkbox.checked = false;
+      sec.classList.remove("on");
     });
     loadInterfaces();
   }
@@ -1484,6 +1527,9 @@
     if (btn.disabled) return;
     // Старый скрипт не должен применяться к другому устройству после неудачного входа.
     lastInfo = null;
+    connectedKey = null;
+    interfacesReady = false;
+    interfaceSeq++;
     lastIfaces = [];
     currentScript = "";
     clearTimeout(previewTimer);
@@ -1498,16 +1544,24 @@
     $("connect-default").disabled = true;
     btn.innerHTML = '<span class="spinner"></span>Читаем данные…';
     savePrefs();
+    var requestedConn = connPayload();
+    var requestedKey = JSON.stringify(requestedConn);
 
     fetch("/api/info", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(connPayload())
+      body: JSON.stringify(requestedConn)
     })
       .then(function (r) { return r.json().catch(function () { throw new Error("сервер вернул некорректный ответ (HTTP " + r.status + ")"); }); })
       .then(function (data) {
+        if (connectionKey() !== requestedKey) throw new Error("Параметры подключения изменились во время запроса. Подключитесь заново.");
         if (!data.ok) throw new Error(data.error || "неизвестная ошибка");
         if (data.version) showAppVersion(data.version);
+        connectedKey = requestedKey;
+        ["lan-iface", "dhcp-iface", "pppoe-iface", "wifi-iface", "geo-wan"].forEach(function (id) { $(id).value = ""; });
+        $("security-wan").textContent = "";
+        delete $("dhcp-iface").dataset.touched;
+        $("wan-links").querySelectorAll('select[data-key="iface"]').forEach(function (el) { el.value = ""; });
         render(data.info);
         initBuilder();
         showTab("build");
@@ -1690,6 +1744,7 @@
   });
 
   $("btn-apply").addEventListener("click", function () {
+    if (!lastInfo || !interfacesReady || connectedKey !== connectionKey()) { invalidateConnection(); return; }
     if (!currentScript || chk("chk-security") || chk("chk-geoNat")) return;
     var host = $("host").value.trim();
     var ok = window.confirm(
@@ -1707,10 +1762,12 @@
     errBox.style.display = "none";
     okBox.style.display = "none";
 
+    var applyConn = connPayload();
+    applyConn.protocol = lastInfo.protocol || applyConn.protocol;
     fetch("/api/apply", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conn: connPayload(), script: currentScript })
+      body: JSON.stringify({ conn: applyConn, script: currentScript })
     })
       .then(function (r) { return r.json(); })
       .then(function (res) {
@@ -1728,7 +1785,7 @@
       .catch(function (e) {
         errBox.style.display = "block";
         errBox.textContent = "Применение не удалось: " + (e.message || e) +
-          "\nМожно скопировать скрипт и вставить его в New Terminal вручную.";
+          "\nНастройки могли примениться частично. Не запускайте скрипт повторно, пока не проверите состояние роутера и причину ошибки.";
         setScriptState("ошибка применения", "bad");
       })
       .finally(function () {

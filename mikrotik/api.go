@@ -182,12 +182,18 @@ func collectAPI(ctx context.Context, p *Params) (*Info, error) {
 		return nil, fmt.Errorf("чтение /system/identity: %w", err)
 	}
 	if len(recs) > 0 {
-		info.Identity = recs[0]["identity"]
+		info.Identity = recs[0]["name"]
+		if info.Identity == "" {
+			info.Identity = recs[0]["identity"]
+		}
 	}
 
 	recs, _, err = c.exec("/system/resource/print")
 	if err != nil {
 		return nil, fmt.Errorf("чтение /system/resource: %w", err)
+	}
+	if len(recs) == 0 || recs[0]["version"] == "" {
+		return nil, fmt.Errorf("не удалось прочитать версию RouterOS из /system/resource")
 	}
 	if len(recs) > 0 {
 		m := recs[0]
@@ -202,7 +208,10 @@ func collectAPI(ctx context.Context, p *Params) (*Info, error) {
 	// ошибку здесь игнорируем.
 	if recs, _, err := c.exec("/system/routerboard/print"); err == nil && len(recs) > 0 {
 		m := recs[0]
-		info.Board = m["board"]
+		info.Board = m["model"]
+		if info.Board == "" {
+			info.Board = m["board"] // compatibility with older/custom replies
+		}
 		info.CurrentFirmware = m["current-firmware"]
 		if info.CurrentFirmware == "" {
 			info.CurrentFirmware = m["firmware"]
@@ -217,9 +226,10 @@ func collectAPI(ctx context.Context, p *Params) (*Info, error) {
 	}
 	for _, m := range recs {
 		info.Packages = append(info.Packages, Package{
-			Name:    m["name"],
-			Version: m["version"],
-			Status:  m["status"],
+			Name:     m["name"],
+			Version:  m["version"],
+			Status:   m["status"],
+			Disabled: toBool(m["disabled"]),
 		})
 	}
 
