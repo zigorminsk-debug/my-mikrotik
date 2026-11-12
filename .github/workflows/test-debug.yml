@@ -20,7 +20,7 @@ jobs:
             echo "== gofmt =="
             gofmt -l . || true
             echo "== gofmt -d =="
-            gofmt -d mikrotik/failover_test.go || true
+            gofmt -d . 2>&1 | head -80 || true
             echo "== vet =="
             go vet ./... 2>&1 || true
             echo "== test =="
