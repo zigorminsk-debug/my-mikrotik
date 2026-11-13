@@ -291,7 +291,7 @@
 
       <div class="card">
         <h2>Снимок каналов и маршрутов</h2>
-        <div class="hint">Ручной сбор по API или REST: интерфейсы, IPv4-адреса, DHCP-клиенты, маршруты по умолчанию и доступные служебные записи failover. Настройки не изменяются. Данные читаются последовательно и могут измениться во время сбора; доступность интернета не проверяется. Через MAC-Telnet эта диагностика пока недоступна.</div>
+        <div class="hint">Ручной сбор по API или REST: интерфейсы, IPv4-адреса, DHCP-клиенты, серверы и пулы, DHCP-сети, маршруты по умолчанию и доступные служебные записи failover. Настройки не изменяются. Данные читаются последовательно и могут измениться во время сбора; доступность интернета не проверяется. Через MAC-Telnet эта диагностика пока недоступна.</div>
         <div class="row"><button type="button" class="ghost" id="snapshot-run">Собрать снимок</button><button type="button" class="ghost" id="snapshot-copy" disabled>Скопировать</button><button type="button" class="ghost" id="snapshot-download" disabled>Скачать .txt</button></div>
         <div class="hint">Отчёт содержит IP-адреса, шлюзы, имена интерфейсов и комментарии маршрутов. Проверьте и при необходимости удалите частные сведения перед отправкой.</div>
         <pre id="snapshot-output" class="mono" aria-live="polite" style="white-space:pre-wrap;word-break:break-word;max-height:32rem;overflow:auto"></pre>
@@ -360,7 +360,7 @@
                     <input id="lan-addr" class="cidr" value="192.168.88.1/24" spellcheck="false" placeholder="192.168.88.1/24">
                   </label>
                 </div>
-                <div class="sec-note" id="lan-note"></div>
+                <div class="sec-note" id="lan-note"></div><div class="sec-note">Изменение адреса LAN может оборвать связь и оставить DHCP или DNS настроенными частично. Автоматическое применение временно заблокировано до проверки конфликтов и безопасного возврата. Скопированный или скачанный скрипт остаётся исполняемым — не запускайте его.</div>
               </div>
             </div>
 
@@ -648,8 +648,7 @@
             <button type="button" class="ghost" id="btn-download" disabled>Скачать .rsc</button>
           </div>
           <div class="hint">
-            Кнопка «Применить» создаёт на роутере служебный скрипт <code>mti-apply</code>
-            и запускает его — результат тот же, что при вставке кода в New Terminal.
+            По API/REST кнопка «Применить» создаёт на роутере скрипт <code>mti-apply</code> и запускает его; по MAC команды передаются построчно. При разрыве связи или ошибке настройки могут примениться частично.
             Объекты, созданные конструктором, помечены <code>mti-*</code>; повторное
             применение заменяет их. Перед изменениями полезно сохранить резервную копию:
             <code>/system backup save name=before-mti</code>.
@@ -1241,7 +1240,7 @@
 
   function setActions(enabled) {
     ["btn-copy", "btn-download"].forEach(function (id) { $(id).disabled = !enabled; });
-    $("btn-apply").disabled = !enabled || chk("chk-security") || chk("chk-geoNat") || currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1;
+    $("btn-apply").disabled = !enabled || chk("chk-security") || chk("chk-geoNat") || (currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1);
   }
 
   // ------------------------------------------------------------------
@@ -1285,7 +1284,7 @@
           err.textContent = "";
           currentScript = res.script || "";
           $("script").textContent = currentScript.length > 30000 ? currentScript.slice(0, 30000) + "\n\n# Предпросмотр сокращён. Полный скрипт доступен в .rsc и при копировании." : currentScript;
-          setScriptState(currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 ? "только предпросмотр" : chk("chk-geoNat") ? "готов к скачиванию" : "готов к применению", "good");
+          setScriptState((currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1) ? "только предпросмотр" : chk("chk-geoNat") ? "готов к скачиванию" : "готов к применению", "good");
           setActions(currentScript.indexOf("# Настройки не выбраны") < 0);
           if (currentScript.indexOf("# Настройки не выбраны") >= 0) setScriptState("нет включённых разделов");
         }
@@ -1621,11 +1620,14 @@
   function formatNetworkSnapshot(snapshot, version) {
     var sections = [
       ["interfaces", "Интерфейсы", ["name", "type", "running", "disabled"]],
-      ["addresses", "IPv4-адреса", ["address", "network", "interface", "actual-interface", "dynamic", "disabled", "invalid"]],
+      ["addresses", "IPv4-адреса", ["address", "network", "interface", "actual-interface", "dynamic", "disabled", "invalid", "mti-owned"]],
       ["dhcp", "DHCP-клиенты", ["interface", "status", "address", "gateway", "add-default-route", "default-route-distance", "disabled", "dynamic"]],
       ["routes", "Маршруты по умолчанию и mti-probe-link", ["dst-address", "gateway", "immediate-gw", "routing-table", "routing-mark", "distance", "active", "dynamic", "disabled", "unreachable", "blackhole", "comment"]],
       ["scheduler", "Планировщик mti-failover", ["name", "disabled", "interval", "run-count", "next-run"]],
-      ["environment", "Доступные переменные mti-failover", ["name", "value"]]
+      ["environment", "Доступные переменные mti-failover", ["name", "value"]],
+      ["dhcpServers", "DHCP-серверы", ["name", "interface", "address-pool", "disabled", "invalid", "dynamic"]],
+      ["pools", "IPv4-пулы", ["name", "ranges", "next-pool"]],
+      ["dhcpNetworks", "DHCP-сети", ["address", "gateway", "dns-server", "mti-owned"]]
     ];
     var lines = ["MikroTik Inspector — снимок каналов и маршрутов", version,
       "Протокол: " + protoLabel(snapshot.protocol), "Начало (UTC): " + (snapshot.startedAt || "—"), "Конец (UTC): " + (snapshot.finishedAt || "—"),
@@ -1657,7 +1659,7 @@
       });
       if (section.truncated) lines.push("  Показаны не все записи (лимит 500).");
     });
-    lines.push("", "Переменные скрипта могут отсутствовать или быть устаревшими; наличие записи не доказывает работу контроллера. Маршрутизация зависит и от других правил/таблиц.");
+    lines.push("", "Переменные скрипта могут отсутствовать или быть устаревшими; наличие записи не доказывает работу контроллера. Маршрутизация зависит и от других правил/таблиц. Снимок не проверяет полные настройки DNS, все конфликты или безопасность применения. mti-owned=— означает неизвестно.");
     return lines.join("\n");
   }
 
@@ -1872,7 +1874,7 @@
 
   $("btn-apply").addEventListener("click", function () {
     if (!lastInfo || !interfacesReady || connectedKey !== connectionKey()) { invalidateConnection(); return; }
-    if (!currentScript || chk("chk-security") || chk("chk-geoNat") || currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1) return;
+    if (!currentScript || chk("chk-security") || chk("chk-geoNat") || currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1) return;
     var host = $("host").value.trim();
     var ok = window.confirm(
       "Применить настройки на роутере " + host + "?\n\n" +
@@ -1916,7 +1918,7 @@
         setScriptState("ошибка применения", "bad");
       })
       .finally(function () {
-        btn.disabled = !currentScript;
+        setActions(!!currentScript && !!lastInfo && interfacesReady && connectedKey === connectionKey());
         btn.textContent = "Применить на роутере";
       });
   });

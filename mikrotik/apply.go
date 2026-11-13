@@ -32,6 +32,9 @@ func ApplyScript(ctx context.Context, p Params, source string) (string, error) {
 		return "", err
 	}
 	source = strings.TrimSpace(source)
+	if strings.Contains(source, "# MTI-LAN-PREVIEW-ONLY") {
+		return "", fmt.Errorf("изменение LAN доступно только для предпросмотра: требуется проверка конфликтов и безопасное восстановление доступа")
+	}
 	if strings.Contains(source, "# MTI-USB-PREVIEW-ONLY") {
 		return "", fmt.Errorf("экспериментальный USB-режим доступен только для предпросмотра: проверка на RouterOS и план возврата ещё не завершены")
 	}

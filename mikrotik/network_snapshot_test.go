@@ -80,6 +80,12 @@ func TestCollectNetworkSnapshotREST(t *testing.T) {
 			w.WriteHeader(403)
 		case "/rest/ip/route":
 			fmt.Fprint(w, `[{"dst-address":"0.0.0.0/0","active":"true"}]`)
+		case "/rest/ip/dhcp-server":
+			w.WriteHeader(403)
+		case "/rest/ip/pool":
+			fmt.Fprint(w, `[{"name":"default-dhcp","ranges":"192.168.88.2-192.168.88.254","password":"secret"}]`)
+		case "/rest/ip/dhcp-server/network":
+			fmt.Fprint(w, `[{"address":"192.168.88.0/24","gateway":"192.168.88.1"}]`)
 		default:
 			fmt.Fprint(w, `[]`)
 		}
@@ -96,6 +102,12 @@ func TestCollectNetworkSnapshotREST(t *testing.T) {
 	}
 	if snap.Sections["addresses"].Status != "error" || snap.Sections["routes"].Status != "ok" || len(snap.Sections["routes"].Rows) != 1 {
 		t.Fatalf("%+v", snap)
+	}
+	if snap.Sections["dhcpServers"].Status != "error" || len(snap.Sections["pools"].Rows) != 1 || len(snap.Sections["dhcpNetworks"].Rows) != 1 {
+		t.Fatalf("LAN partial results: %+v", snap.Sections)
+	}
+	if _, ok := snap.Sections["pools"].Rows[0]["password"]; ok {
+		t.Fatal("unexpected sensitive pool field")
 	}
 	for _, r := range requests {
 		if !strings.HasPrefix(r, "GET ") {
@@ -171,8 +183,43 @@ func TestCollectNetworkSnapshotAPI(t *testing.T) {
 		t.Fatalf("routes: %+v", s.Sections["routes"])
 	}
 	got := <-commands
-	want := []string{"/login", "/system/identity/print", "/system/resource/print", "/interface/print", "/ip/address/print", "/ip/dhcp-client/print", "/ip/route/print", "/system/scheduler/print", "/system/script/environment/print"}
+	want := []string{"/login", "/system/identity/print", "/system/resource/print", "/interface/print", "/ip/address/print", "/ip/dhcp-client/print", "/ip/route/print", "/system/scheduler/print", "/system/script/environment/print", "/ip/dhcp-server/print", "/ip/pool/print", "/ip/dhcp-server/network/print"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("unexpected commands: %v", got)
+	}
+}
+
+func TestSnapshotLANFieldsAndConfidentiality(t *testing.T) {
+	read := func(path string) ([]map[string]string, error) {
+		switch path {
+		case "/ip/address":
+			return []map[string]string{{"address": "192.168.88.1/24", "interface": "bridge", "comment": "mti-lan"}, {"address": "192.0.2.1/24", "comment": "PRIVATE-COMMENT"}, {"address": "198.51.100.1/24"}}, nil
+		case "/ip/dhcp-server":
+			return []map[string]string{{"name": "defconf", "interface": "bridge", "address-pool": "default-dhcp", "disabled": "false", "secret": "PRIVATE-SECRET"}}, nil
+		case "/ip/pool":
+			return []map[string]string{{"name": "default-dhcp", "ranges": "192.168.88.10-192.168.88.254", "password": "PRIVATE-SECRET"}}, nil
+		case "/ip/dhcp-server/network":
+			return []map[string]string{{"address": "192.168.88.0/24", "gateway": "192.168.88.1", "dns-server": "192.168.88.1", "comment": "mti-net"}}, nil
+		default:
+			return []map[string]string{}, nil
+		}
+	}
+	s := buildSnapshot(context.Background(), "rest", read, false)
+	if len(s.Sections["dhcpServers"].Rows) != 1 || len(s.Sections["pools"].Rows) != 1 || len(s.Sections["dhcpNetworks"].Rows) != 1 {
+		t.Fatalf("missing LAN data: %+v", s.Sections)
+	}
+	addr := s.Sections["addresses"].Rows
+	if addr[0]["mti-owned"] != "true" || addr[1]["mti-owned"] != "false" {
+		t.Fatalf("unexpected ownership: %+v", addr)
+	}
+	if _, ok := addr[2]["mti-owned"]; ok {
+		t.Fatal("missing comment must remain unknown")
+	}
+	if s.Sections["dhcpNetworks"].Rows[0]["mti-owned"] != "true" {
+		t.Fatal("network ownership missing")
+	}
+	b, _ := json.Marshal(s)
+	if strings.Contains(string(b), "PRIVATE-") {
+		t.Fatalf("private field leaked: %s", b)
 	}
 }

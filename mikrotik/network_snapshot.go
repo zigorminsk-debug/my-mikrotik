@@ -42,6 +42,9 @@ var snapshotSpecs = []snapshotSpec{
 		}
 		return false
 	}},
+	{"dhcpServers", "/ip/dhcp-server", []string{"name", "interface", "address-pool", "disabled", "invalid", "dynamic"}, nil},
+	{"pools", "/ip/pool", []string{"name", "ranges", "next-pool"}, nil},
+	{"dhcpNetworks", "/ip/dhcp-server/network", []string{"address", "gateway", "dns-server"}, nil},
 }
 
 const maxSnapshotRows = 500
@@ -75,6 +78,15 @@ func buildSnapshot(ctx context.Context, protocol string, read snapshotReader, st
 					for _, key := range spec.fields {
 						if v, ok := rec[key]; ok {
 							row[key] = v
+						}
+					}
+					// Only expose whether our exact tag is present, not arbitrary comments.
+					if comment, ok := rec["comment"]; ok {
+						if spec.id == "addresses" {
+							row["mti-owned"] = fmt.Sprint(comment == "mti-lan")
+						}
+						if spec.id == "dhcpNetworks" {
+							row["mti-owned"] = fmt.Sprint(comment == "mti-net")
 						}
 					}
 					section.Rows = append(section.Rows, row)

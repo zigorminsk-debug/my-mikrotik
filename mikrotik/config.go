@@ -679,6 +679,9 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 		if strings.TrimSpace(dhcpIface(s)) == "" {
 			errs = append(errs, "DHCP: выберите интерфейс")
 		}
+		if s.LAN.Enabled && strings.TrimSpace(s.LAN.Interface) != "" && dhcpIface(s) != strings.TrimSpace(s.LAN.Interface) {
+			errs = append(errs, "DHCP: интерфейс сервера должен совпадать с интерфейсом выбранного LAN-адреса")
+		}
 		if strings.TrimSpace(s.DHCP.LeaseTime) == "" {
 			errs = append(errs, "DHCP: укажите время аренды")
 		}
@@ -916,6 +919,9 @@ func buildScript(device *Info, s *Settings, now time.Time, avail map[string]bool
 	fmt.Fprintf(&b, "#  RouterOS %s · %s\n", rosVer, now.UTC().Format("2006-01-02 15:04 MST"))
 	fmt.Fprintf(&b, "#  Вставьте в New Terminal и выполните.\n")
 	fmt.Fprintf(&b, "# ================================================================\n")
+	if s.LAN.Enabled && avail[featLAN] {
+		b.WriteString("# MTI-LAN-PREVIEW-ONLY\n# ОПАСНО: смена LAN может оборвать доступ и оставить конфигурацию частичной. Не выполнять без проверки существующей конфигурации и плана возврата.\n")
+	}
 
 	anyOn := false
 	if s.Backup.Enabled && avail["backup"] {

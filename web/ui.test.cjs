@@ -69,6 +69,8 @@ usbCtx.setActions(true);
 assert.equal(usbEls['btn-copy'].disabled, false);
 assert.equal(usbEls['btn-download'].disabled, false);
 assert.equal(usbEls['btn-apply'].disabled, true);
+usbCtx.currentScript = '# MTI-LAN-PREVIEW-ONLY'; usbCtx.setActions(true);
+assert.equal(usbEls['btn-apply'].disabled, true);
 usbCtx.currentScript = ':put 1'; usbCtx.setActions(true);
 assert.equal(usbEls['btn-apply'].disabled, false);
 assert.match(html, /usb-tether/);
