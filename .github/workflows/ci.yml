@@ -147,6 +147,15 @@ jobs:
         shell: pwsh
         run: ./windows/smoke-test.ps1 -Installer "$PWD/dist/mikrotik-inspector-v$env:VERSION-windows-setup.exe"
 
+      - name: Загрузка установщика Windows отдельно
+        if: matrix.goos == 'windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mikrotik-inspector-v${{ env.VERSION }}-windows-setup
+          path: dist/mikrotik-inspector-v${{ env.VERSION }}-windows-setup.exe
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Загрузка артефакта
         uses: actions/upload-artifact@v7
         with:

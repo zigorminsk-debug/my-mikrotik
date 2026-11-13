@@ -48,7 +48,10 @@ Microsoft Edge, в Linux/macOS — браузер по умолчанию.
 | Контрольные суммы | `SHA256SUMS.txt`, `SHA256SUMS-android.txt` |
 
 Свежие сборки также лежат в артефактах запусков (**Actions → запуск → Artifacts**):
-`android-apk` — из workflow «Android APK».
+`mikrotik-inspector-v<версия>-windows-setup` содержит только установщик Windows;
+`android-apk` — из workflow «Android APK». GitHub выдаёт артефакт Actions ZIP-архивом:
+распакуйте его и запустите находящийся внутри файл `...-windows-setup.exe`. Для скачивания
+может потребоваться вход в GitHub; срок хранения CI-артефактов — 14 дней.
 
 ## Сборка
 
