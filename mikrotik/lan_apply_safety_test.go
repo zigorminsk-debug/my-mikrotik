@@ -38,3 +38,16 @@ func TestLANMarkerRejectsAllTransports(t *testing.T) {
 		}
 	}
 }
+
+func TestGeoNATMarkerRejectsAllTransports(t *testing.T) {
+	for _, protocol := range []string{"api", "rest", "auto", "mac"} {
+		host := "127.0.0.1"
+		if protocol == "mac" {
+			host = "AA:BB:CC:DD:EE:FF"
+		}
+		_, err := ApplyScript(context.Background(), Params{Host: host, User: "test", Protocol: protocol}, "# MTI-GEONAT-IMPORT-ONLY\n:put 1")
+		if err == nil || !strings.Contains(err.Error(), "нельзя применять автоматически") {
+			t.Errorf("%s: %v", protocol, err)
+		}
+	}
+}

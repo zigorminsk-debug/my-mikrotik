@@ -42,7 +42,7 @@ assert.match(snapshot, /Не удалось прочитать/);
 assert.match(snapshot, /Не прочитано/);
 assert.match(snapshot, /Записей не найдено/);
 
-const els = Object.fromEntries(['build-body', 'build-need-conn', 'result', 'copy'].map(id =>
+const els = Object.fromEntries(['build-body', 'build-need-conn', 'result', 'copy', 'build-ok'].map(id =>
   [id, {style: {}, classList: {remove() {}}}]));
 Object.assign(ctx, {
   lastInfo: {model: 'old'}, connectedKey: 'old', interfacesReady: true,
@@ -62,8 +62,8 @@ assert.match(ctx.error, /Подключитесь заново/);
 console.log('UI guards: OK');
 
 // Experimental USB scripts can be inspected/copied but not applied by the UI.
-const usbEls = Object.fromEntries(['btn-copy', 'btn-download', 'btn-apply'].map(id => [id, {disabled:false}]));
-const usbCtx = vm.createContext({$: id => usbEls[id], chk: () => false, currentScript: '# MTI-USB-PREVIEW-ONLY\n:put 1'});
+const usbEls = Object.fromEntries(['btn-copy', 'btn-download', 'btn-apply', 'apply-reason'].map(id => [id, {disabled:false,style:{},textContent:''}]));
+const usbCtx = vm.createContext({$: id => usbEls[id], chk: () => false, applyInProgress:false, currentScript: '# MTI-USB-PREVIEW-ONLY\n:put 1'});
 vm.runInContext(between('  function setActions(enabled)', '  // ------------------------------------------------------------------\n  // предпросмотр'), usbCtx);
 usbCtx.setActions(true);
 assert.equal(usbEls['btn-copy'].disabled, false);

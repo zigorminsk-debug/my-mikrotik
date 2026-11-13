@@ -32,6 +32,9 @@ func ApplyScript(ctx context.Context, p Params, source string) (string, error) {
 		return "", err
 	}
 	source = strings.TrimSpace(source)
+	if strings.Contains(source, "# MTI-GEONAT-IMPORT-ONLY") {
+		return "", fmt.Errorf("белый список NAT нельзя применять автоматически: проверьте правила и импортируйте отдельно при наличии безопасного локального доступа")
+	}
 	if strings.Contains(source, "# MTI-LAN-PREVIEW-ONLY") {
 		return "", fmt.Errorf("изменение LAN доступно только для предпросмотра: требуется проверка конфликтов и безопасное восстановление доступа")
 	}

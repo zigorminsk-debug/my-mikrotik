@@ -95,6 +95,10 @@
   button.ghost:hover { background: #cbd5e1; }
   button.ok { background: var(--ok); }
   button.ok:hover { background: #15803d; }
+  button:disabled, button.ok:disabled, button.ghost:disabled,
+  button:disabled:hover, button.ok:disabled:hover, button.ghost:disabled:hover {
+    background: #94a3b8; color: #fff; cursor: not-allowed; transform: none;
+  }
   .hint { font-size: 12.5px; color: var(--muted); margin-top: 12px; line-height: 1.5; }
   .hint code { background: #f1f5f9; padding: 1px 6px; border-radius: 5px; font-size: 12px; }
 
@@ -539,6 +543,7 @@
                   <label class="field">Протокол<select id="geo-protocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select></label>
                   <label class="field">Дополнительные IPv4 / CIDR (через запятую или с новой строки)<textarea id="geo-manual" rows="3" placeholder="203.0.113.5, 198.51.100.0/24" spellcheck="false"></textarea></label>
                 </div>
+                <div id="geo-target-warning" class="warn-box" style="display:none">Внутренний адрес совпадает с адресом подключения к роутеру. Если это адрес самого MikroTik, трафик к нему проходит через input, а не forward; этот белый список не предназначен для защиты сервисов роутера. Проверьте адрес назначения и существующий dst-nat.</div>
                 <label class="field">Поиск страны<input id="geo-search" placeholder="Название или код страны" autocomplete="off"></label>
                 <div id="geo-country-list" style="max-height:180px;overflow:auto;border:1px solid #cbd5e1;padding:8px" aria-label="Выбор стран"></div>
                 <div class="actions"><button type="button" class="ghost" id="geo-load">Загрузить IP выбранных стран</button></div>
@@ -639,6 +644,7 @@
           <div id="build-error" class="error-box" style="display:none"></div>
           <div id="build-skip" class="warn-box" style="margin-bottom:12px;display:none"></div>
           <div id="build-ok" class="ok-box" style="margin-bottom:12px;display:none"></div>
+          <div id="apply-reason" class="warn-box" aria-live="polite" style="margin-bottom:12px;display:none"></div>
           <div class="script-wrap">
             <pre class="script" id="script"></pre>
           </div>
@@ -685,6 +691,7 @@
   var connectedKey = null;  // bound to all connection fields, including the password; never persisted
   var interfacesReady = false;
   var interfaceSeq = 0;
+  var applyInProgress = false;
   var snapshotSeq = 0;
   var snapshotText = "";
 
@@ -822,6 +829,7 @@
     if (connectedKey !== null && connectedKey === connectionKey()) return;
     connectedKey = null;
     clearNetworkSnapshot();
+    $("build-ok").style.display = "none"; $("build-ok").textContent = "";
     interfacesReady = false;
     lastInfo = null;
     lastIfaces = [];
@@ -1240,7 +1248,15 @@
 
   function setActions(enabled) {
     ["btn-copy", "btn-download"].forEach(function (id) { $(id).disabled = !enabled; });
-    $("btn-apply").disabled = !enabled || chk("chk-security") || chk("chk-geoNat") || (currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1);
+    var reason = "";
+    if (applyInProgress) reason = "Применение уже выполняется. Дождитесь результата.";
+    else if (enabled && chk("chk-geoNat")) reason = "Белый список NAT: автоматическое применение отключено. Доступен файл .rsc; перед импортом проверьте ресурс и правила в WinBox.";
+    else if (enabled && chk("chk-security")) reason = "Защита WinBox: автоматическое применение отключено. Сначала проверьте скрипт и локальный доступ.";
+    else if (enabled && currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1) reason = "Экспериментальный USB-режим доступен только для предпросмотра.";
+    else if (enabled && currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1) reason = "Изменение LAN доступно только для предпросмотра до проверки безопасного восстановления доступа.";
+    $("btn-apply").disabled = !enabled || !!reason;
+    $("apply-reason").style.display = reason ? "block" : "none";
+    $("apply-reason").textContent = reason;
   }
 
   // ------------------------------------------------------------------
@@ -1249,6 +1265,9 @@
   function schedulePreview() {
     clearTimeout(previewTimer);
     previewSeq++; // сразу делаем предыдущий результат недействительным
+    // A previous success is not evidence that the newly generated script ran.
+    $("build-ok").style.display = "none";
+    $("build-ok").textContent = "";
     currentScript = "";
     setActions(false);
     if (lastInfo) setScriptState("обновление…");
@@ -1425,6 +1444,16 @@
   ["security-wan", "security-trusted", "security-port", "security-ack"].forEach(function (id) {
     $(id).addEventListener("input", schedulePreview); $(id).addEventListener("change", schedulePreview);
   });
+  function updateGeoTargetWarning() {
+    var destination = $("geo-destination").value.trim();
+    var host = $("host").value.trim();
+    $("geo-target-warning").style.display = destination !== "" && destination === host ? "block" : "none";
+  }
+  ["host", "geo-destination"].forEach(function (id) {
+    $(id).addEventListener("input", updateGeoTargetWarning);
+    $(id).addEventListener("change", updateGeoTargetWarning);
+  });
+  updateGeoTargetWarning();
   ["geo-id", "geo-wan", "geo-destination", "geo-port", "geo-protocol", "geo-manual", "geo-ack"].forEach(function (id) {
     $(id).addEventListener("input", schedulePreview); $(id).addEventListener("change", schedulePreview);
   });
@@ -1517,6 +1546,7 @@
     var btn = $("go");
     if (btn.disabled) return;
     // Старый скрипт не должен применяться к другому устройству после неудачного входа.
+    $("build-ok").style.display = "none"; $("build-ok").textContent = "";
     clearNetworkSnapshot();
     lastInfo = null;
     connectedKey = null;
@@ -1874,7 +1904,7 @@
 
   $("btn-apply").addEventListener("click", function () {
     if (!lastInfo || !interfacesReady || connectedKey !== connectionKey()) { invalidateConnection(); return; }
-    if (!currentScript || chk("chk-security") || chk("chk-geoNat") || currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1) return;
+    if (applyInProgress || !currentScript || chk("chk-security") || chk("chk-geoNat") || currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1) return;
     var host = $("host").value.trim();
     var ok = window.confirm(
       "Применить настройки на роутере " + host + "?\n\n" +
@@ -1884,7 +1914,12 @@
     if (!ok) return;
 
     var btn = this;
-    btn.disabled = true;
+    var applySeq = previewSeq, applyKey = connectedKey, applyDevice = lastInfo, applySource = currentScript;
+    function currentApply() {
+      return previewSeq === applySeq && connectedKey === applyKey && connectionKey() === applyKey && lastInfo === applyDevice && currentScript === applySource;
+    }
+    applyInProgress = true;
+    setActions(true);
     btn.innerHTML = '<span class="spinner"></span>Применяем…';
     var okBox = $("build-ok");
     var errBox = $("build-error");
@@ -1896,12 +1931,16 @@
     fetch("/api/apply", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conn: applyConn, script: currentScript })
+      body: JSON.stringify({ conn: applyConn, script: applySource })
     })
       .then(function (r) { return r.json(); })
       .then(function (res) {
         if (!res.ok) throw new Error(res.error || "не удалось применить настройки");
         okBox.style.display = "block";
+        if (!currentApply()) {
+          okBox.textContent = "Ранее запущенный скрипт на " + host + " завершился без ошибки. Это сообщение относится к прежним настройкам, а не к текущему предпросмотру. Проверьте роутер перед повторными действиями.";
+          return;
+        }
         if (res.protocol === "mac") {
           okBox.textContent = "Настройки применены на " + host +
             " (протокол: " + protoLabel(res.protocol) + ").\nКоманды выполнены в терминале роутера по MAC.";
@@ -1913,11 +1952,13 @@
       })
       .catch(function (e) {
         errBox.style.display = "block";
-        errBox.textContent = "Применение не удалось: " + (e.message || e) +
-          "\nНастройки могли примениться частично. Не запускайте скрипт повторно, пока не проверите состояние роутера и причину ошибки.";
-        setScriptState("ошибка применения", "bad");
+        errBox.textContent = "Применение скрипта на " + host + " не удалось: " + (e.message || e) +
+          "\nНастройки могли примениться частично. Не запускайте скрипт повторно, пока не проверите состояние роутера и причину ошибки." +
+          (currentApply() ? "" : " Это сообщение относится к предыдущему запросу, не к текущему предпросмотру.");
+        if (currentApply()) setScriptState("ошибка применения", "bad");
       })
       .finally(function () {
+        applyInProgress = false;
         setActions(!!currentScript && !!lastInfo && interfacesReady && connectedKey === connectionKey());
         btn.textContent = "Применить на роутере";
       });

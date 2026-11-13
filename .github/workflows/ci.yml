@@ -39,6 +39,7 @@ jobs:
         run: |
           node web/ui.test.cjs
           node web/snapshot.test.cjs
+          node web/apply.test.cjs
 
       - name: go vet
         run: go vet ./...

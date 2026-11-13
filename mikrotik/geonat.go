@@ -93,7 +93,7 @@ func natAddresses(s GeoNATSettings) ([]string, error) {
 
 func validateGeoNAT(s GeoNATSettings, ifaces []Iface, settings *Settings) []string {
 	var errs []string
-	if settings.Backup.Enabled || settings.Security.Enabled || settings.LAN.Enabled || settings.DHCP.Enabled || settings.DNS.Enabled || settings.NTP.Enabled || settings.PPPoE.Enabled || settings.WiFi.Enabled || settings.WGServer.Enabled || settings.WGClient.Enabled || settings.OpenVPN.Enabled || settings.PPTP.Enabled || settings.OVPNCertificates.Enabled {
+	if settings.WAN.Enabled || settings.PortForward.Enabled || settings.Backup.Enabled || settings.Security.Enabled || settings.LAN.Enabled || settings.DHCP.Enabled || settings.DNS.Enabled || settings.NTP.Enabled || settings.PPPoE.Enabled || settings.WiFi.Enabled || settings.WGServer.Enabled || settings.WGClient.Enabled || settings.OpenVPN.Enabled || settings.PPTP.Enabled || settings.OVPNCertificates.Enabled {
 		errs = append(errs, "Белый список NAT: выключите остальные разделы и применяйте отдельным скриптом")
 	}
 	if !s.Acknowledged {
@@ -137,6 +137,7 @@ func writeGeoNAT(b *strings.Builder, s GeoNATSettings, now time.Time) {
 	tag := fmt.Sprintf("%s%x", prefix, sum[:5])
 	list := tag
 	section(b, "IP / Firewall", "Белый список для dst-nat: "+s.Resource)
+	b.WriteString("# MTI-GEONAT-IMPORT-ONLY\n")
 	b.WriteString("# Только IPv4. Резервная копия обязательна; импортируйте локально, а не через API.\n")
 	b.WriteString("# Страны основаны на делегировании адресов RIR, а не на достоверном местоположении пользователя.\n")
 	if len(s.Countries) > 0 {
