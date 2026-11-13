@@ -22,6 +22,7 @@ const lte = {'dst-address':'0.0.0.0/0','routing-table':'main',gateway:'172.26.48
 const ethernet = {'dst-address':'0.0.0.0/0','routing-table':'main',gateway:'10.254.100.254','immediate-gw':'10.254.100.254%ether1',distance:'2',active:'true',dynamic:'true'};
 const controlled = {'dst-address':'0.0.0.0/0','routing-table':'main',gateway:'172.26.48.63%lte1',distance:'3',disabled:'false',comment:'mti-wan-0'};
 const warns = rows => ctx.formatNetworkSnapshot(mk(rows),'v').includes('ВНИМАНИЕ: в main');
+assert.match(ctx.formatNetworkSnapshot(mk([lte]), 'v'), /ручные ping и ICMP traceroute/);
 assert.equal(warns([lte, ethernet, controlled]), true);
 assert.equal(warns([{...lte,distance:'1'}, ethernet]), false);
 assert.equal(warns([lte, {...ethernet,active:undefined}]), false);

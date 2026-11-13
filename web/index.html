@@ -1628,7 +1628,8 @@
     ];
     var lines = ["MikroTik Inspector — снимок каналов и маршрутов", version,
       "Протокол: " + protoLabel(snapshot.protocol), "Начало (UTC): " + (snapshot.startedAt || "—"), "Конец (UTC): " + (snapshot.finishedAt || "—"),
-      "Данные не атомарны и не подтверждают доступ в интернет. Отсутствующее поле — неизвестно."];
+      "Данные не атомарны и не подтверждают доступ в интернет. Отсутствующее поле — неизвестно.",
+      "Если настроен mti-failover, его правило mti-probe может направлять ICMP к контрольному адресу через основной канал, включая ручные ping и ICMP traceroute роутера. Такие проверки не доказывают маршрут обычного трафика или работу резерва."];
     // Only flag positively identified active IPv4 main defaults with distinct
     // gateways and equal distances. ECMP may be intentional, so don't diagnose
     // an outage or claim that the conflict list is exhaustive.
