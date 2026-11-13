@@ -52,7 +52,7 @@ const maxSnapshotRows = 500
 type snapshotReader func(string) ([]map[string]string, error)
 
 // buildSnapshot does not return arbitrary router records: fields are allowlisted.
-func buildSnapshot(ctx context.Context, protocol string, read snapshotReader, stopOnError bool) *NetworkSnapshot {
+func buildSnapshot(ctx context.Context, protocol string, read snapshotReader, stopOnError bool, includeHistory ...bool) *NetworkSnapshot {
 	s := &NetworkSnapshot{Protocol: protocol, StartedAt: time.Now().UTC(), Sections: make(map[string]SnapshotSection)}
 	stopped := false
 	for _, spec := range snapshotSpecs {
@@ -95,6 +95,18 @@ func buildSnapshot(ctx context.Context, protocol string, read snapshotReader, st
 		}
 		s.Sections[spec.id] = section
 	}
+	if len(includeHistory) > 0 && includeHistory[0] {
+		section := SnapshotSection{Status: "skipped", Rows: []map[string]string{}}
+		if !stopped && ctx.Err() == nil {
+			recs, err := read("/log")
+			if err != nil {
+				section.Status = "error"
+			} else {
+				section = historySection(recs)
+			}
+		}
+		s.Sections["failoverHistory"] = section
+	}
 	s.FinishedAt = time.Now().UTC()
 	return s
 }
@@ -102,7 +114,7 @@ func buildSnapshot(ctx context.Context, protocol string, read snapshotReader, st
 // CollectNetworkSnapshot uses the previously selected transport, never fallback.
 // Identity and resource are re-read in the same session before collecting sections;
 // matching them is only a consistency check, not proof of the physical device.
-func CollectNetworkSnapshot(ctx context.Context, p Params, expected *Info) (*NetworkSnapshot, error) {
+func CollectNetworkSnapshot(ctx context.Context, p Params, expected *Info, includeHistory ...bool) (*NetworkSnapshot, error) {
 	if expected == nil {
 		return nil, fmt.Errorf("сначала подключитесь к устройству")
 	}
@@ -169,5 +181,5 @@ func CollectNetworkSnapshot(ctx context.Context, p Params, expected *Info) (*Net
 	if strings.TrimSpace(expected.RouterOS) == "" {
 		return nil, fmt.Errorf("нет версии устройства; подключитесь заново")
 	}
-	return buildSnapshot(ctx, p.Protocol, read, p.Protocol == "api"), nil
+	return buildSnapshot(ctx, p.Protocol, read, p.Protocol == "api", includeHistory...), nil
 }

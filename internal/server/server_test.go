@@ -511,3 +511,60 @@ func TestOverlappingApplyIsRejected(t *testing.T) {
 		}
 	}
 }
+
+func TestSnapshotHistoryOptInHTTP(t *testing.T) {
+	logReads := 0
+	router := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/system/identity":
+			fmt.Fprint(w, `[{"name":"router"}]`)
+		case "/rest/system/resource":
+			fmt.Fprint(w, `[{"version":"7.15","board-name":"hAP","architecture-name":"arm"}]`)
+		case "/rest/log":
+			logReads++
+			fmt.Fprint(w, `[{"time":"11:57:00","message":"mti-failover: backup=true, приоритет основного канала 3"},{"message":"SECRET"}]`)
+		default:
+			fmt.Fprint(w, `[]`)
+		}
+	}))
+	defer router.Close()
+	u, _ := url.Parse(router.URL)
+	_, ps, _ := net.SplitHostPort(u.Host)
+	port, _ := strconv.Atoi(ps)
+	app := newTestServer(t)
+	body := map[string]any{
+		"conn":   mikrotik.Params{Host: "127.0.0.1", RESTPort: port, User: "admin", Protocol: "rest"},
+		"device": &mikrotik.Info{Identity: "router", RouterOS: "7.15", Protocol: "rest", Architecture: "arm", Diagnostics: &mikrotik.IdentityDiagnostics{ResourceBoard: "hAP"}},
+	}
+	for _, requested := range []bool{false, true} {
+		body["includeHistory"] = requested
+		b, _ := json.Marshal(body)
+		resp, err := http.Post(app.URL+"/api/network-snapshot", "application/json", bytes.NewReader(b))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result struct {
+			OK       bool                      `json:"ok"`
+			Snapshot *mikrotik.NetworkSnapshot `json:"snapshot"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&result)
+		resp.Body.Close()
+		if err != nil || !result.OK || result.Snapshot == nil {
+			t.Fatalf("result=%+v err=%v", result, err)
+		}
+		h, present := result.Snapshot.Sections["failoverHistory"]
+		if present != requested {
+			t.Fatalf("requested=%v section=%+v", requested, h)
+		}
+		if requested && (logReads != 1 || len(h.Rows) != 1 || h.Rows[0]["backup"] != "true") {
+			t.Fatalf("reads=%d %+v", logReads, h)
+		}
+		if !requested && logReads != 0 {
+			t.Fatal("log read without opt in")
+		}
+		encoded, _ := json.Marshal(result)
+		if strings.Contains(string(encoded), "SECRET") {
+			t.Fatal("raw log exposed")
+		}
+	}
+}

@@ -6,7 +6,7 @@ const html = fs.readFileSync(require('node:path').join(__dirname, 'index.html'),
 const start = html.indexOf('  function clearNetworkSnapshot()');
 const end = html.indexOf('  // Only explicitly selected fields', start);
 assert(start >= 0 && end > start);
-const names = ['snapshot-output','snapshot-run','snapshot-copy','snapshot-download','appver'];
+const names = ['snapshot-output','snapshot-run','snapshot-copy','snapshot-download','snapshot-history','appver'];
 const el = Object.fromEntries(names.map(n => [n, {textContent:'', disabled:false, addEventListener(type, fn) {this.handler=fn;}}]));
 el.appver.textContent='v0.2.6';
 let resolveFetch, sent;
@@ -24,6 +24,9 @@ const controlled = {'dst-address':'0.0.0.0/0','routing-table':'main',gateway:'17
 const warns = rows => ctx.formatNetworkSnapshot(mk(rows),'v').includes('ВНИМАНИЕ: в main');
 assert.match(ctx.formatNetworkSnapshot(mk([lte]), 'v'), /ручные ping и ICMP traceroute/);
 const lanReport = ctx.formatNetworkSnapshot({sections:{dhcpServers:{status:'ok',rows:[{name:'defconf',interface:'bridge'}]},pools:{status:'error'},dhcpNetworks:{status:'skipped'}}},'v');
+const historyReport=ctx.formatNetworkSnapshot({sections:{failoverHistory:{status:'ok',truncated:true,rows:[{time:'11:57:00',event:'Контроллер сообщил о переключении',backup:'true',distance:'3'}]}}},'v');
+assert.match(historyReport,/11:57:00/); assert.match(historyReport,/последние 100/); assert.match(historyReport,/не подтверждает путь трафика/);
+assert.doesNotMatch(ctx.formatNetworkSnapshot({sections:{}},'v'),/История контроллера/);
 assert.match(lanReport, /DHCP-серверы/); assert.match(lanReport, /defconf/); assert.match(lanReport, /IPv4-пулы/); assert.match(lanReport, /DHCP-сети/);
 
 assert.equal(warns([lte, ethernet, controlled]), true);
@@ -33,10 +36,12 @@ assert.equal(warns([lte, {...ethernet,'routing-table':'mti-probe'}]), false);
 assert.equal(warns([lte, {...lte}]), false);
 assert.equal(ctx.formatNetworkSnapshot(mk([lte,ethernet],'error'),'v').includes('ВНИМАНИЕ: в main'), false);
 (async()=>{
+  el['snapshot-history'].checked=true;
   el['snapshot-run'].handler.call(el['snapshot-run']);
+  assert.equal(sent.body.includeHistory,true);
   assert.equal(sent.url,'/api/network-snapshot');
   assert.equal(sent.body.conn.protocol,'rest');
-  ctx.clearNetworkSnapshot();
+  el['snapshot-history'].handler();
   resolveFetch({ok:true,json:()=>Promise.resolve({ok:true,snapshot:{protocol:'rest',sections:{}}})});
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(el['snapshot-output'].textContent,'');

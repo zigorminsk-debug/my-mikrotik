@@ -296,6 +296,8 @@
       <div class="card">
         <h2>Снимок каналов и маршрутов</h2>
         <div class="hint">Ручной сбор по API или REST: интерфейсы, IPv4-адреса, DHCP-клиенты, серверы и пулы, DHCP-сети, маршруты по умолчанию и доступные служебные записи failover. Настройки не изменяются. Данные читаются последовательно и могут измениться во время сбора; доступность интернета не проверяется. Через MAC-Telnet эта диагностика пока недоступна.</div>
+        <label class="checkbox"><input type="checkbox" id="snapshot-history"> Добавить в снимок краткую историю контроллера mti-failover</label>
+        <div class="hint">По желанию читается журнал роутера; в отчёт попадают только распознанные события контроллера без текста сообщений и шлюзов. Время — как указано роутером, может быть без даты. Журнал может быть очищен, неполон или недоступен; по нему нельзя установить причину обрыва.</div>
         <div class="row"><button type="button" class="ghost" id="snapshot-run">Собрать снимок</button><button type="button" class="ghost" id="snapshot-copy" disabled>Скопировать</button><button type="button" class="ghost" id="snapshot-download" disabled>Скачать .txt</button></div>
         <div class="hint">Отчёт содержит IP-адреса, шлюзы, имена интерфейсов и комментарии маршрутов. Проверьте и при необходимости удалите частные сведения перед отправкой.</div>
         <pre id="snapshot-output" class="mono" aria-live="polite" style="white-space:pre-wrap;word-break:break-word;max-height:32rem;overflow:auto"></pre>
@@ -1669,6 +1671,7 @@
       ["pools", "IPv4-пулы", ["name", "ranges", "next-pool"]],
       ["dhcpNetworks", "DHCP-сети", ["address", "gateway", "dns-server", "mti-owned"]]
     ];
+    if ((snapshot.sections || {}).failoverHistory) sections.push(["failoverHistory", "История контроллера mti-failover (время роутера)", ["time", "event", "backup", "distance", "expected-distance", "replies", "routes", "dynamic-routes"]]);
     var lines = ["MikroTik Inspector — снимок каналов и маршрутов", version,
       "Протокол: " + protoLabel(snapshot.protocol), "Начало (UTC): " + (snapshot.startedAt || "—"), "Конец (UTC): " + (snapshot.finishedAt || "—"),
       "Данные не атомарны и не подтверждают доступ в интернет. Отсутствующее поле — неизвестно.",
@@ -1697,8 +1700,9 @@
       rows.forEach(function (row, i) {
         lines.push("  " + (i + 1) + ". " + spec[2].map(function (k) { return k + "=" + (row[k] === undefined || row[k] === "" ? "—" : row[k]); }).join("; "));
       });
-      if (section.truncated) lines.push("  Показаны не все записи (лимит 500).");
+      if (section.truncated) lines.push(spec[0] === "failoverHistory" ? "  Показаны последние 100 распознанных записей в порядке ответа роутера." : "  Показаны не все записи (лимит 500).");
     });
+    if ((snapshot.sections || {}).failoverHistory) lines.push("", "История распознаёт только известные сообщения mti-failover, а не весь журнал. Время задано роутером, дата или часовой пояс могут отсутствовать. Пустой результат не доказывает отсутствие событий; запись контроллера не подтверждает путь трафика или причину неисправности.");
     lines.push("", "Переменные скрипта могут отсутствовать или быть устаревшими; наличие записи не доказывает работу контроллера. Маршрутизация зависит и от других правил/таблиц. Снимок не проверяет полные настройки DNS, все конфликты или безопасность применения. mti-owned=— означает неизвестно.");
     return lines.join("\n");
   }
@@ -1711,7 +1715,7 @@
     btn.disabled = true; btn.textContent = "Собираем…";
     $("snapshot-output").textContent = "Чтение данных…";
     function current() { return seq === snapshotSeq && lastInfo === device && connectedKey === key && connectionKey() === key; }
-    fetch("/api/network-snapshot", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({conn:conn, device:device})})
+    fetch("/api/network-snapshot", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({conn:conn, device:device, includeHistory:$("snapshot-history").checked})})
       .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
       .then(function (data) {
         if (!current()) return;
@@ -1723,6 +1727,8 @@
       .catch(function (e) { if (current()) $("snapshot-output").textContent = "Ошибка: " + (e.message || "не удалось собрать снимок"); })
       .finally(function () { if (current()) { btn.disabled = false; btn.textContent = "Собрать снимок"; } });
   });
+  $("snapshot-history").addEventListener("change", clearNetworkSnapshot);
+
   $("snapshot-copy").addEventListener("click", function () {
     if (!snapshotText || !lastInfo || connectedKey !== connectionKey()) return;
     var btn = this;
