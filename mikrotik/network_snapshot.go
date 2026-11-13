@@ -2,6 +2,7 @@ package mikrotik
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -114,7 +115,18 @@ func buildSnapshot(ctx context.Context, protocol string, read snapshotReader, st
 // CollectNetworkSnapshot uses the previously selected transport, never fallback.
 // Identity and resource are re-read in the same session before collecting sections;
 // matching them is only a consistency check, not proof of the physical device.
+type NetworkSnapshotOptions struct {
+	IncludeHistory bool
+	IncludeLTE     bool
+}
+
 func CollectNetworkSnapshot(ctx context.Context, p Params, expected *Info, includeHistory ...bool) (*NetworkSnapshot, error) {
+	return CollectNetworkSnapshotWithOptions(ctx, p, expected, NetworkSnapshotOptions{IncludeHistory: len(includeHistory) > 0 && includeHistory[0]})
+}
+
+// CollectNetworkSnapshotWithOptions adds explicitly requested diagnostics; LTE
+// monitor is a one-shot observational command, not a continuous poll.
+func CollectNetworkSnapshotWithOptions(ctx context.Context, p Params, expected *Info, options NetworkSnapshotOptions) (*NetworkSnapshot, error) {
 	if expected == nil {
 		return nil, fmt.Errorf("сначала подключитесь к устройству")
 	}
@@ -128,6 +140,8 @@ func CollectNetworkSnapshot(ctx context.Context, p Params, expected *Info, inclu
 		return nil, fmt.Errorf("протокол не совпадает с последним подключением")
 	}
 	var read snapshotReader
+	var readLTE snapshotReader
+	var monitorLTE func(string) ([]map[string]string, error)
 	if p.Protocol == "api" {
 		c, err := dialAPI(ctx, &p)
 		if err != nil {
@@ -139,6 +153,14 @@ func CollectNetworkSnapshot(ctx context.Context, p Params, expected *Info, inclu
 		}
 		read = func(path string) ([]map[string]string, error) {
 			recs, _, err := c.exec(path + "/print")
+			return recs, err
+		}
+		readLTE = func(_ string) ([]map[string]string, error) {
+			recs, _, err := c.exec("/interface/lte/print", "=.proplist=name,running,disabled")
+			return recs, err
+		}
+		monitorLTE = func(name string) ([]map[string]string, error) {
+			recs, _, err := c.exec("/interface/lte/monitor", "=numbers="+name, "=once=", "=.proplist="+lteMonitorProperties)
 			return recs, err
 		}
 	} else {
@@ -154,6 +176,45 @@ func CollectNetworkSnapshot(ctx context.Context, p Params, expected *Info, inclu
 			out := make([]map[string]string, 0, len(recs))
 			for _, rec := range recs {
 				m := make(map[string]string, len(rec))
+				for k := range rec {
+					m[k] = jstr(rec, k)
+				}
+				out = append(out, m)
+			}
+			return out, nil
+		}
+		readLTE = func(_ string) ([]map[string]string, error) {
+			recs, err := rc.get(ctx, "/rest/interface/lte?.proplist=name,running,disabled")
+			if err != nil {
+				return nil, err
+			}
+			out := make([]map[string]string, 0, len(recs))
+			for _, rec := range recs {
+				m := map[string]string{}
+				for k := range rec {
+					m[k] = jstr(rec, k)
+				}
+				out = append(out, m)
+			}
+			return out, nil
+		}
+		monitorLTE = func(name string) ([]map[string]string, error) {
+			data, err := rc.post(ctx, "/rest/interface/lte/monitor", map[string]any{"numbers": name, "once": "", ".proplist": lteMonitorProperties})
+			if err != nil {
+				return nil, err
+			}
+			var raw json.RawMessage = data
+			var arr []map[string]any
+			if err := json.Unmarshal(raw, &arr); err != nil {
+				var obj map[string]any
+				if err = json.Unmarshal(raw, &obj); err != nil || obj == nil {
+					return nil, fmt.Errorf("invalid monitor reply")
+				}
+				arr = []map[string]any{obj}
+			}
+			out := make([]map[string]string, 0, len(arr))
+			for _, rec := range arr {
+				m := map[string]string{}
 				for k := range rec {
 					m[k] = jstr(rec, k)
 				}
@@ -181,5 +242,25 @@ func CollectNetworkSnapshot(ctx context.Context, p Params, expected *Info, inclu
 	if strings.TrimSpace(expected.RouterOS) == "" {
 		return nil, fmt.Errorf("нет версии устройства; подключитесь заново")
 	}
-	return buildSnapshot(ctx, p.Protocol, read, p.Protocol == "api", includeHistory...), nil
+	snapshot := buildSnapshot(ctx, p.Protocol, read, p.Protocol == "api", options.IncludeHistory)
+	if options.IncludeLTE {
+		stopped := ctx.Err() != nil
+		if p.Protocol == "api" {
+			for _, section := range snapshot.Sections {
+				if section.Status != "ok" {
+					stopped = true
+					break
+				}
+			}
+		}
+		if !strings.HasPrefix(expected.RouterOS, "7.") {
+			snapshot.Sections["lte"] = SnapshotSection{Status: "unsupported", Rows: []map[string]string{}}
+		} else if stopped {
+			snapshot.Sections["lte"] = SnapshotSection{Status: "skipped", Rows: []map[string]string{}}
+		} else {
+			snapshot.Sections["lte"] = collectLTE(ctx, readLTE, monitorLTE, p.Protocol == "api")
+		}
+		snapshot.FinishedAt = time.Now().UTC()
+	}
+	return snapshot, nil
 }
