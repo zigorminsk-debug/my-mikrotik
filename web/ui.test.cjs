@@ -26,6 +26,15 @@ assert.equal(ctx.preferLan([{name:'b1', type:'bridge'}, {name:'b2', type:'bridge
 assert.equal(ctx.preferLan([{name:'ether2', type:'ethernet', bridge:'bridge'}]), '');
 assert.equal(ctx.preferEther([{name:'ether1', type:'ethernet', bridge:'bridge'}, {name:'ether2', type:'ethernet'}]), 'ether2');
 
+vm.runInContext(between('  function protoLabel(p)', '  // ------------------------------------------------------------------\n  // автоматическое'), ctx);
+vm.runInContext(between('  function identityDiagnostic(info, version, time)', '  function report(info)'), ctx);
+const diagnostic = ctx.identityDiagnostic({protocol:'api', identity:'PRIVATE-IDENTITY', model:'hAP ac3', architecture:'arm', routeros:'7', diagnostics:{resourceBoard:'hAP ac3', routerboardModel:'RBD53iG', routerboardBoard:'legacy', routerboardStatus:'ok'}, password:'SECRET', serial:'SERIAL'}, 'Версия: v0.2.4', '2026-01-01T00:00:00Z');
+assert.match(diagnostic, /board-name: hAP ac3/);
+assert.match(diagnostic, /model: RBD53iG/);
+assert.doesNotMatch(diagnostic, /PRIVATE-IDENTITY|SECRET|SERIAL/);
+assert.match(ctx.identityDiagnostic({model:'CHR',diagnostics:{routerboardStatus:'error'}}, 'v', 't'), /не удалось прочитать/);
+assert.match(ctx.identityDiagnostic({model:'RB',diagnostics:{routerboardModel:'RB',routerboardStatus:'ok'}}, 'v', 't'), /model \(резерв\)/);
+
 const els = Object.fromEntries(['build-body', 'build-need-conn', 'result', 'copy'].map(id =>
   [id, {style: {}, classList: {remove() {}}}]));
 Object.assign(ctx, {

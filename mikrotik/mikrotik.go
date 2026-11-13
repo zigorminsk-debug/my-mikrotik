@@ -24,20 +24,41 @@ type Package struct {
 	Disabled bool   `json:"disabled,omitempty"`
 }
 
+// IdentityDiagnostics records the actual source fields, not an inferred model.
+// It intentionally excludes serial numbers and connection credentials.
+type IdentityDiagnostics struct {
+	ResourceBoard     string `json:"resourceBoard,omitempty"`
+	RouterboardModel  string `json:"routerboardModel,omitempty"`
+	RouterboardBoard  string `json:"routerboardBoard,omitempty"`
+	RouterboardStatus string `json:"routerboardStatus"` // ok, empty, error
+}
+
 // Info — информация, полученная с роутера.
 type Info struct {
-	Protocol        string    `json:"protocol"` // "api" или "rest"
-	Identity        string    `json:"identity,omitempty"`
-	Model           string    `json:"model,omitempty"`
-	Board           string    `json:"board,omitempty"`
-	Architecture    string    `json:"architecture,omitempty"`
-	RouterOS        string    `json:"routeros,omitempty"`
-	CurrentFirmware string    `json:"currentFirmware,omitempty"`
-	FactoryFirmware string    `json:"factoryFirmware,omitempty"`
-	UpgradeFirmware string    `json:"upgradeFirmware,omitempty"`
-	Uptime          string    `json:"uptime,omitempty"`
-	CPU             string    `json:"cpu,omitempty"`
-	Packages        []Package `json:"packages"`
+	Diagnostics     *IdentityDiagnostics `json:"diagnostics,omitempty"`
+	Protocol        string               `json:"protocol"` // "api", "rest" или "mac"
+	Identity        string               `json:"identity,omitempty"`
+	Model           string               `json:"model,omitempty"`
+	Board           string               `json:"board,omitempty"`
+	Architecture    string               `json:"architecture,omitempty"`
+	RouterOS        string               `json:"routeros,omitempty"`
+	CurrentFirmware string               `json:"currentFirmware,omitempty"`
+	FactoryFirmware string               `json:"factoryFirmware,omitempty"`
+	UpgradeFirmware string               `json:"upgradeFirmware,omitempty"`
+	Uptime          string               `json:"uptime,omitempty"`
+	CPU             string               `json:"cpu,omitempty"`
+	Packages        []Package            `json:"packages"`
+}
+
+// recordRouterboard preserves the source fields independently of display fallbacks.
+func (info *Info) recordRouterboard(status, model, board string) {
+	info.Diagnostics.RouterboardStatus = status
+	info.Diagnostics.RouterboardModel = model
+	info.Diagnostics.RouterboardBoard = board
+	info.Board = model
+	if info.Board == "" {
+		info.Board = board
+	}
 }
 
 // Params — параметры подключения к роутеру.

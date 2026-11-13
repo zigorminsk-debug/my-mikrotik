@@ -290,6 +290,15 @@
       </div>
 
       <div class="card">
+        <h2>Диагностика определения модели</h2>
+        <div class="hint">Только чтение: значения получены при последнем подключении, без дополнительных команд изменения настроек. Сверьте их с маркировкой на корпусе. Названия модели и платы могут различаться — это не обязательно ошибка. Для обновления нажмите «Подключиться» ещё раз.</div>
+        <div class="warn-box">При несоответствии модели не применяйте настройки, пока не проверите адрес подключения и вывод RouterOS. Эти данные сами по себе не подтверждают физическую идентичность устройства.</div>
+        <pre id="identity-diagnostic" class="mono" style="white-space:pre-wrap;word-break:break-word;max-height:22rem;overflow:auto"></pre>
+        <div class="row"><button type="button" class="ghost" id="copy-identity-diagnostic">Скопировать диагностику</button><button type="button" class="ghost" id="download-identity-diagnostic">Скачать диагностику .txt</button></div>
+        <div class="hint">В отчёт не включаются введённые адрес, логин, пароль и серийный номер. Значения присланы роутером и могут содержать частную информацию — проверьте текст перед отправкой.</div>
+      </div>
+
+      <div class="card">
         <div class="table-head">
           <h2>Установленные пакеты</h2>
           <span class="count" id="pkgcount"></span>
@@ -1549,6 +1558,7 @@
     lastInfo = info;
     hideStatus();
 
+    $("identity-diagnostic").textContent = identityDiagnostic(info, $("appver").textContent, new Date().toISOString());
     $("meta").textContent = "протокол: " + protoLabel(info.protocol);
     var wrap = $("devcards");
     wrap.textContent = "";
@@ -1583,6 +1593,35 @@
 
     $("result").classList.add("show");
     $("copy").style.display = "";
+  }
+
+  // Only explicitly selected fields are exported; never serialize Params or Info wholesale.
+  function identityDiagnostic(info, version, time) {
+    var d = info.diagnostics || {};
+    var status = {ok: "получена запись", empty: "пустой ответ", error: "не удалось прочитать"}[d.routerboardStatus] || "нет данных";
+    var chosen = d.resourceBoard ? "/system resource: board-name" :
+      (d.routerboardModel ? "/system routerboard: model (резерв)" :
+      (d.routerboardBoard ? "/system routerboard: board (резерв)" : "не определён"));
+    function shown(x) { return x || "—"; }
+    return [
+      "MikroTik Inspector — диагностика определения модели",
+      version, "Время сбора (UTC): " + time,
+      "Транспорт: " + protoLabel(info.protocol),
+      "Модель в приложении: " + shown(info.model),
+      "Источник отображаемой модели: " + chosen,
+      "/system resource → board-name: " + shown(d.resourceBoard),
+      "/system resource → architecture-name: " + shown(info.architecture),
+      "/system resource → cpu: " + shown(info.cpu),
+      "/system resource → version: " + shown(info.routeros),
+      "/system routerboard → состояние чтения: " + status,
+      "/system routerboard → model: " + shown(d.routerboardModel),
+      "/system routerboard → board (резервное поле): " + shown(d.routerboardBoard),
+      "/system routerboard → current-firmware: " + shown(info.currentFirmware),
+      "/system routerboard → factory-firmware: " + shown(info.factoryFirmware),
+      "/system routerboard → upgrade-firmware: " + shown(info.upgradeFirmware),
+      "", "RouterBOARD может быть недоступен, например на CHR; причина ошибки чтения здесь не установлена.",
+      "Сверьте маркировку корпуса с данными и проверьте адрес подключения. Разные названия сами по себе не доказывают ошибку или другое устройство."
+    ].join("\n");
   }
 
   function report(info) {
@@ -1631,6 +1670,22 @@
     }).catch(function () {
       showError("не удалось скопировать в буфер обмена");
     });
+  });
+
+  $("copy-identity-diagnostic").addEventListener("click", function () {
+    if (!lastInfo || connectedKey !== connectionKey()) return;
+    var btn = this;
+    copyText($("identity-diagnostic").textContent).then(function () { flash(btn, "Скопировано ✓"); })
+      .catch(function () { showError("Не удалось скопировать диагностику"); });
+  });
+  $("download-identity-diagnostic").addEventListener("click", function () {
+    if (!lastInfo || connectedKey !== connectionKey()) return;
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([$("identity-diagnostic").textContent], {type:"text/plain;charset=utf-8"}));
+    a.download = "mikrotik-identity-diagnostic.txt";
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 0);
+    flash(this, "Файл сохранён ✓");
   });
 
   function flash(btn, text) {

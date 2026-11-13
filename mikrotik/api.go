@@ -185,7 +185,7 @@ func collectAPI(ctx context.Context, p *Params) (*Info, error) {
 		return nil, err
 	}
 
-	info := &Info{Protocol: "api", Packages: []Package{}}
+	info := &Info{Protocol: "api", Packages: []Package{}, Diagnostics: &IdentityDiagnostics{RouterboardStatus: "error"}}
 
 	recs, _, err := c.exec("/system/identity/print")
 	if err != nil {
@@ -208,6 +208,7 @@ func collectAPI(ctx context.Context, p *Params) (*Info, error) {
 	if len(recs) > 0 {
 		m := recs[0]
 		info.Model = m["board-name"]
+		info.Diagnostics.ResourceBoard = info.Model
 		info.Architecture = m["architecture-name"]
 		info.RouterOS = m["version"]
 		info.Uptime = m["uptime"]
@@ -216,18 +217,19 @@ func collectAPI(ctx context.Context, p *Params) (*Info, error) {
 
 	// /system/routerboard/print есть не на всех устройствах (CHR, x86) —
 	// ошибку здесь игнорируем.
-	if recs, _, err := c.exec("/system/routerboard/print"); err == nil && len(recs) > 0 {
-		m := recs[0]
-		info.Board = m["model"]
-		if info.Board == "" {
-			info.Board = m["board"] // compatibility with older/custom replies
+	rb, _, rbErr := c.exec("/system/routerboard/print")
+	if rbErr == nil {
+		info.Diagnostics.RouterboardStatus = "empty"
+		if len(rb) > 0 {
+			m := rb[0]
+			info.recordRouterboard("ok", m["model"], m["board"])
+			info.CurrentFirmware = m["current-firmware"]
+			if info.CurrentFirmware == "" {
+				info.CurrentFirmware = m["firmware"]
+			}
+			info.FactoryFirmware = m["factory-firmware"]
+			info.UpgradeFirmware = m["upgrade-firmware"]
 		}
-		info.CurrentFirmware = m["current-firmware"]
-		if info.CurrentFirmware == "" {
-			info.CurrentFirmware = m["firmware"]
-		}
-		info.FactoryFirmware = m["factory-firmware"]
-		info.UpgradeFirmware = m["upgrade-firmware"]
 	}
 
 	recs, _, err = c.exec("/system/package/print")

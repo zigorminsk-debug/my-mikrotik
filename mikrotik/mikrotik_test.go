@@ -294,6 +294,9 @@ func TestCollectAPIWrongPassword(t *testing.T) {
 
 func checkMockInfo(t *testing.T, info *Info) {
 	t.Helper()
+	if info.Diagnostics == nil || info.Diagnostics.ResourceBoard != "hEX S" || info.Diagnostics.RouterboardModel != "RB750Gr3" || info.Diagnostics.RouterboardStatus != "ok" {
+		t.Errorf("diagnostics = %+v", info.Diagnostics)
+	}
 	if info.Identity != mockIdentity {
 		t.Errorf("identity = %q, ожидалось %q", info.Identity, mockIdentity)
 	}

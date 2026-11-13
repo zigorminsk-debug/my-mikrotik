@@ -95,7 +95,7 @@ func collectMAC(ctx context.Context, p *Params) (*Info, error) {
 	}
 	defer sess.Close()
 
-	info := &Info{Protocol: "mac", Packages: []Package{}}
+	info := &Info{Protocol: "mac", Packages: []Package{}, Diagnostics: &IdentityDiagnostics{RouterboardStatus: "error"}}
 
 	if recs, err := macPrint(sess, "/system identity"); err == nil && len(recs) > 0 {
 		info.Identity = recs[0]["name"]
@@ -112,24 +112,27 @@ func collectMAC(ctx context.Context, p *Params) (*Info, error) {
 	}
 	m := recs[0]
 	info.Model = m["board-name"]
+	info.Diagnostics.ResourceBoard = info.Model
 	info.Architecture = m["architecture-name"]
 	info.RouterOS = m["version"]
 	info.Uptime = m["uptime"]
 	info.CPU = m["cpu"]
 	// /system routerboard есть не на всех устройствах — ошибку игнорируем.
-	if recs, err := macPrint(sess, "/system routerboard"); err == nil && len(recs) > 0 {
-		m := recs[0]
-		info.Board = m["model"]
-		if info.Board == "" {
-			info.Board = m["board"]
+	rb, rbErr := macPrint(sess, "/system routerboard")
+	if rbErr == nil {
+		info.Diagnostics.RouterboardStatus = "empty"
+		if len(rb) > 0 {
+			m := rb[0]
+			info.recordRouterboard("ok", m["model"], m["board"])
+			info.CurrentFirmware = m["current-firmware"]
+			if info.CurrentFirmware == "" {
+				info.CurrentFirmware = m["firmware"]
+			}
+			info.FactoryFirmware = m["factory-firmware"]
+			info.UpgradeFirmware = m["upgrade-firmware"]
 		}
-		info.CurrentFirmware = m["current-firmware"]
-		if info.CurrentFirmware == "" {
-			info.CurrentFirmware = m["firmware"]
-		}
-		info.FactoryFirmware = m["factory-firmware"]
-		info.UpgradeFirmware = m["upgrade-firmware"]
 	}
+
 	if recs, err := macPrint(sess, "/system package"); err == nil {
 		for _, m := range recs {
 			info.Packages = append(info.Packages, Package{

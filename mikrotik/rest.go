@@ -125,7 +125,7 @@ func collectREST(ctx context.Context, p *Params) (*Info, error) {
 	if err != nil {
 		return nil, err
 	}
-	info := &Info{Protocol: "rest", Packages: []Package{}}
+	info := &Info{Protocol: "rest", Packages: []Package{}, Diagnostics: &IdentityDiagnostics{RouterboardStatus: "error"}}
 	if len(ident) > 0 {
 		info.Identity = jstr(ident[0], "name")
 		if info.Identity == "" {
@@ -143,6 +143,7 @@ func collectREST(ctx context.Context, p *Params) (*Info, error) {
 	if len(res) > 0 {
 		m := res[0]
 		info.Model = jstr(m, "board-name")
+		info.Diagnostics.ResourceBoard = info.Model
 		info.Architecture = jstr(m, "architecture-name")
 		info.RouterOS = jstr(m, "version")
 		info.Uptime = jstr(m, "uptime")
@@ -150,18 +151,19 @@ func collectREST(ctx context.Context, p *Params) (*Info, error) {
 	}
 
 	// /rest/system/routerboard есть не на всех устройствах — ошибку игнорируем.
-	if rb, err := rc.get(ctx, "/rest/system/routerboard"); err == nil && len(rb) > 0 {
-		m := rb[0]
-		info.Board = jstr(m, "model")
-		if info.Board == "" {
-			info.Board = jstr(m, "board")
+	rb, rbErr := rc.get(ctx, "/rest/system/routerboard")
+	if rbErr == nil {
+		info.Diagnostics.RouterboardStatus = "empty"
+		if len(rb) > 0 {
+			m := rb[0]
+			info.recordRouterboard("ok", jstr(m, "model"), jstr(m, "board"))
+			info.CurrentFirmware = jstr(m, "current-firmware")
+			if info.CurrentFirmware == "" {
+				info.CurrentFirmware = jstr(m, "firmware")
+			}
+			info.FactoryFirmware = jstr(m, "factory-firmware")
+			info.UpgradeFirmware = jstr(m, "upgrade-firmware")
 		}
-		info.CurrentFirmware = jstr(m, "current-firmware")
-		if info.CurrentFirmware == "" {
-			info.CurrentFirmware = jstr(m, "firmware")
-		}
-		info.FactoryFirmware = jstr(m, "factory-firmware")
-		info.UpgradeFirmware = jstr(m, "upgrade-firmware")
 	}
 
 	pkgs, err := rc.get(ctx, "/rest/system/package")
