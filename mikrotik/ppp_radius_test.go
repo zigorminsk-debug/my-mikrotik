@@ -18,7 +18,7 @@ func TestPPPRadiusPreview(t *testing.T) {
 	if !res.OK {
 		t.Fatalf("%s", res.Error)
 	}
-	for _, s := range []string{"# MTI-PPP-RADIUS-PREVIEW-ONLY", ":if ([:len [/radius find]] > 0)", "/radius add service=ppp address=192.0.2.10 authentication-port=1812 accounting-port=1813 secret=RandomSecret_1234567890 comment=mti-ppp-radius disabled=no", "/ppp aaa set use-radius=yes", "PPPoE", "скрипт", "исполняемый"} {
+	for _, s := range []string{"# MTI-PPP-RADIUS-GUARDED-APPLY", ":if ([:len [/radius find]] > 0)", "/radius add service=ppp address=192.0.2.10 authentication-port=1812 accounting-port=1813 secret=RandomSecret_1234567890 comment=mti-ppp-radius disabled=no", "/ppp aaa set use-radius=yes", "PPPoE", "скрипте", "исполняемый"} {
 		if !strings.Contains(res.Script, s) {
 			t.Errorf("missing %q: %s", s, res.Script)
 		}
@@ -34,7 +34,7 @@ func TestPPPRadiusPreview(t *testing.T) {
 			host = "AA:BB:CC:DD:EE:FF"
 		}
 		_, err := ApplyScript(context.Background(), Params{Host: host, User: "admin", Protocol: protocol}, res.Script)
-		if err == nil || !strings.Contains(err.Error(), "только для предпросмотра") {
+		if err == nil || !strings.Contains(err.Error(), "общий endpoint") {
 			t.Fatalf("%s: %v", protocol, err)
 		}
 	}
@@ -79,7 +79,7 @@ func TestPPPRadiusValidation(t *testing.T) {
 func TestPPPRadiusAvailabilityAndIsolation(t *testing.T) {
 	for _, dev := range []*Info{{RouterOS: "6.49", Packages: []Package{{Name: "ppp"}}}, radiusDevice()} {
 		r := Generate(dev, nil, &Settings{PPPRadius: validRadius()}, time.Time{})
-		if !r.OK || !strings.Contains(r.Script, "MTI-PPP-RADIUS-PREVIEW-ONLY") {
+		if !r.OK || !strings.Contains(r.Script, "MTI-PPP-RADIUS-GUARDED-APPLY") {
 			t.Fatalf("%+v", r)
 		}
 	}

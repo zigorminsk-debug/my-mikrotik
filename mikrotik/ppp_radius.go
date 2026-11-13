@@ -43,8 +43,8 @@ func validatePPPRadius(r PPPRadiusSettings, s *Settings) []string {
 
 func writePPPRadius(b *strings.Builder, r PPPRadiusSettings) {
 	section(b, "RADIUS", "PPP VPN через FreeRADIUS / Active Directory")
-	b.WriteString("# MTI-PPP-RADIUS-PREVIEW-ONLY\n")
-	b.WriteString("# ПРЕДПРОСМОТР: автоприменение заблокировано; этот текст исполняемый при ручном импорте.\n")
+	b.WriteString("# MTI-PPP-RADIUS-GUARDED-APPLY\n")
+	b.WriteString("# Автоприменение через приложение только после проверки; текст исполняемый при ручном импорте.\n")
 	b.WriteString("# ВНИМАНИЕ: use-radius влияет на ВСЕ серверы PPP, в том числе PPPoE, не только VPN.\n")
 	b.WriteString("# Локальные PPP secrets проверяются раньше RADIUS. Убедитесь в политике FreeRADIUS, доступности и резервном доступе.\n")
 	b.WriteString("# Общий секрет виден в скрипте и на роутере. Роутер и FreeRADIUS должны обмениваться по защищённой доверенной сети.\n")

@@ -595,9 +595,9 @@
     <label class="field">UDP-порт accounting<input id="radius-acct-port" type="number" min="1" max="65535" value="1813"></label>
     <label class="field">Общий секрет (16–128 латинских букв, цифр, _ или -)<input id="radius-secret" type="password" autocomplete="new-password" spellcheck="false"></label>
   </div>
-  <div class="warn-box"><b>Только предпросмотр.</b> Автоприменение отключено, но скачанный или скопированный скрипт исполняется вручную и может повлиять на доступ. Он включает RADIUS для всех серверов PPP, включая PPPoE, не только VPN. Локальные PPP-пользователи проверяются раньше RADIUS. При наличии любой записи /radius скрипт остановится. Для работы требуются уже настроенный VPN-сервер, FreeRADIUS, AD/LDAP и совпадающий метод аутентификации; здесь они не создаются.</div>
+  <div class="warn-box"><b>Влияет на все серверы PPP, включая PPPoE, не только VPN.</b> Локальные PPP-пользователи проверяются раньше RADIUS. По кнопке программа проверит устройство, включённый L2TP/IPsec, PPP AAA и отсутствие существующих записей /radius, затем после подтверждения применит конфигурацию. Любая существующая запись остановит применение. FreeRADIUS, AD/LDAP, VPN-сервер и метод аутентификации не создаются и не проверяются.</div>
   <label class="checkbox"><input id="radius-ack" type="checkbox"> Я понимаю влияние на все PPP-серверы, проверил резервную копию и имею локальный доступ</label>
-  <div class="sec-note">Секрет будет виден в предпросмотре, скопированном тексте и файле .rsc; не отправляйте их другим и храните защищённо. Классический RADIUS/UDP используйте только в доверенной защищённой сети. PPTP небезопасен; не включайте его ради этой настройки. LDAP bind не проверяет MS-CHAPv2: для AD обычно нужен FreeRADIUS + Samba/winbind. Автоматическая проверка конфликта и доступности ещё не реализована.</div></div>
+  <div class="sec-note">Секрет будет виден в предпросмотре, скопированном тексте и файле .rsc; не отправляйте их другим и храните защищённо. Классический RADIUS/UDP используйте только в доверенной защищённой сети. PPTP небезопасен; не включайте его ради этой настройки. LDAP bind не проверяет MS-CHAPv2: для AD обычно нужен FreeRADIUS + Samba/winbind. Доступность FreeRADIUS, пароль, группы AD и фактическая авторизация не проверяются. При ошибке возможна частичная настройка, откат не автоматический.</div></div>
 </div>
 <div class="sec" data-feat="pptp"><label class="sec-head" for="chk-pptp"><input type="checkbox" id="chk-pptp"><span class="sec-title">PPTP клиент</span><span class="sec-path mono">/interface pptp-client</span><span class="lock" hidden></span></label><div class="sec-body"><div class="grid"><label class="field">Адрес сервера<input id="pptp-server" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">Логин<input id="pptp-user" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">Пароль<input id="pptp-password" type="password" value="" autocomplete="off" spellcheck="false"></label></div><div class="sec-note">PPTP устарел и небезопасен; по возможности используйте WireGuard. Маршруты и firewall настраиваются отдельно. Повторное применение требует ручного удаления подключения.</div></div></div>
           </div>
@@ -702,6 +702,7 @@
   var lastIfaces = [];      // интерфейсы
   var features = {};        // доступность разделов
   var currentScript = "";   // актуальный скрипт
+  var currentRadiusPreview = null;
   var currentGeoPreview = null; // точные параметры последнего предпросмотра
   var previewTimer = null;
   var previewSeq = 0;
@@ -850,7 +851,7 @@
     interfacesReady = false;
     lastInfo = null;
     lastIfaces = [];
-    currentScript = ""; currentGeoPreview = null;
+    currentScript = ""; currentGeoPreview = null; currentRadiusPreview = null;
     var radiusSecret = $("radius-secret"); if (radiusSecret) radiusSecret.value = "";
     var radiusAck = $("radius-ack"); if (radiusAck) radiusAck.checked = false;
     clearTimeout(previewTimer);
@@ -1274,12 +1275,20 @@
     return "";
   }
 
+  function radiusApplyIssue() {
+    if (!currentRadiusPreview || !currentRadiusPreview.generatedAt || currentScript.indexOf("# MTI-PPP-RADIUS-GUARDED-APPLY") < 0) return "Обновите предпросмотр RADIUS.";
+    if (!lastInfo || (lastInfo.protocol !== "api" && lastInfo.protocol !== "rest")) return "Автоприменение RADIUS доступно только через API/REST; подключитесь по IP.";
+    if (new Blob([currentScript]).size > 65536) return "Размер скрипта превышает 64 КиБ.";
+    return "";
+  }
+
   function setActions(enabled) {
     ["btn-copy", "btn-download"].forEach(function (id) { $(id).disabled = !enabled; });
     var reason = "";
     if (applyInProgress) reason = "Применение уже выполняется. Дождитесь результата.";
     else if (enabled && chk("chk-geoNat")) reason = geoApplyIssue();
-    else if (enabled && currentScript.indexOf("# MTI-PPP-RADIUS-PREVIEW-ONLY") !== -1) reason = "RADIUS PPP: только предпросмотр. Ручной скрипт исполняемый; до запуска проверьте все PPP, RADIUS и резервное восстановление.";
+    else if (enabled && chk("chk-pppRadius")) reason = radiusApplyIssue();
+    else if (enabled && (currentScript.indexOf("# MTI-PPP-RADIUS-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-PPP-RADIUS-GUARDED-APPLY") !== -1)) reason = "RADIUS PPP: создайте актуальный отдельный предпросмотр.";
     else if (enabled && chk("chk-security")) reason = "Защита WinBox: автоматическое применение отключено. Сначала проверьте скрипт и локальный доступ.";
     else if (enabled && currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1) reason = "Экспериментальный USB-режим доступен только для предпросмотра.";
     else if (enabled && currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1) reason = "Изменение LAN доступно только для предпросмотра до проверки безопасного восстановления доступа.";
@@ -1297,7 +1306,7 @@
     // A previous success is not evidence that the newly generated script ran.
     $("build-ok").style.display = "none";
     $("build-ok").textContent = "";
-    currentScript = ""; currentGeoPreview = null;
+    currentScript = ""; currentGeoPreview = null; currentRadiusPreview = null;
     setActions(false);
     if (lastInfo) setScriptState("обновление…");
     previewTimer = setTimeout(preview, 220);
@@ -1324,7 +1333,7 @@
           err.style.display = "block";
           err.textContent = "Проверьте настройки:\n· " + (res.error || "неизвестная ошибка").split("; ").join("\n· ");
           $("script").textContent = "";
-          currentScript = ""; currentGeoPreview = null;
+          currentScript = ""; currentGeoPreview = null; currentRadiusPreview = null;
           setScriptState("ошибки", "bad");
           setActions(false);
         } else {
@@ -1332,8 +1341,9 @@
           err.textContent = "";
           currentScript = res.script || "";
           currentGeoPreview = payload.settings.geoNat.enabled ? {device:payload.device, interfaces:payload.interfaces, geoNat:payload.settings.geoNat, generatedAt:res.generatedAt} : null;
+          currentRadiusPreview = payload.settings.pppRadius.enabled ? {device:payload.device, interfaces:payload.interfaces, pppRadius:payload.settings.pppRadius, generatedAt:res.generatedAt} : null;
           $("script").textContent = currentScript.length > 30000 ? currentScript.slice(0, 30000) + "\n\n# Предпросмотр сокращён. Полный скрипт доступен в .rsc и при копировании." : currentScript;
-          setScriptState((currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-PPP-RADIUS-PREVIEW-ONLY") !== -1) ? "только предпросмотр" : chk("chk-geoNat") ? "готов к проверке" : "готов к применению", "good");
+          setScriptState((currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-PPP-RADIUS-PREVIEW-ONLY") !== -1) ? "только предпросмотр" : (chk("chk-geoNat") || chk("chk-pppRadius")) ? "готов к проверке" : "готов к применению", "good");
           setActions(currentScript.indexOf("# Настройки не выбраны") < 0);
           if (currentScript.indexOf("# Настройки не выбраны") >= 0) setScriptState("нет включённых разделов");
         }
@@ -1517,7 +1527,7 @@
     var key = connectedKey;
     var seq = ++interfaceSeq;
     interfacesReady = false;
-    currentScript = ""; currentGeoPreview = null;
+    currentScript = ""; currentGeoPreview = null; currentRadiusPreview = null;
     clearTimeout(previewTimer);
     previewSeq++;
     setActions(false);
@@ -1591,7 +1601,7 @@
     interfacesReady = false;
     interfaceSeq++;
     lastIfaces = [];
-    currentScript = ""; currentGeoPreview = null;
+    currentScript = ""; currentGeoPreview = null; currentRadiusPreview = null;
     clearTimeout(previewTimer);
     previewSeq++;
     setActions(false);
@@ -1950,8 +1960,8 @@
 
   $("btn-apply").addEventListener("click", function () {
     if (!lastInfo || !interfacesReady || connectedKey !== connectionKey()) { invalidateConnection(); return; }
-    var geo = chk("chk-geoNat");
-    if (applyInProgress || !currentScript || chk("chk-security") || (geo && geoApplyIssue()) || (!geo && currentScript.indexOf("# MTI-GEONAT-GUARDED-APPLY") !== -1) || currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-PPP-RADIUS-PREVIEW-ONLY") !== -1) return;
+    var geo = chk("chk-geoNat"), radius = chk("chk-pppRadius");
+    if (applyInProgress || !currentScript || chk("chk-security") || (geo && geoApplyIssue()) || (radius && radiusApplyIssue()) || (!radius && currentScript.indexOf("# MTI-PPP-RADIUS-GUARDED-APPLY") !== -1) || (!geo && currentScript.indexOf("# MTI-GEONAT-GUARDED-APPLY") !== -1) || currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-PPP-RADIUS-PREVIEW-ONLY") !== -1) return;
     var host = $("host").value.trim();
     var prompt = geo ? (
       "Применить белый список NAT на " + host + "?\n\n" +
@@ -1959,6 +1969,12 @@
       "Будут добавлены список адресов и правила в начале forward. Правило accept разрешает доверенные адреса выше существующего firewall; остальные блокируются. Все пробросы на этот адрес и порт через WAN подпадают под правила.\n" +
       "IPv6 и сервисы роутера не защищены; действующие FastTrack/соединения могут сохраняться. Сбой может оставить частичные изменения; автоматического отката нет.\n\n" +
       "Резервная копия сохранена и локальный доступ доступен?"
+    ) : radius ? (
+      "Применить RADIUS для PPP на " + host + "?\n\n" +
+      "Будет добавлен сервер " + currentRadiusPreview.pppRadius.address + " и включён use-radius для ВСЕХ серверов PPP, включая PPPoE. Локальные пользователи имеют приоритет.\n" +
+      "Проверяются наличие L2TP/IPsec, PPP AAA и отсутствие записей RADIUS; работа FreeRADIUS, AD, групп, паролей и VPN не проверяется. use-ipsec=yes может допускать L2TP без IPsec.\n" +
+      "При сбое возможны частичные изменения; отката нет. Секрет сохранится в скрипте mti-apply на роутере.\n\n" +
+      "Резервная копия и локальный доступ есть?"
     ) : (
       "Применить настройки на роутере " + host + "?\n\n" +
       "Будет создан и выполнен скрипт mti-apply. Объекты mti-* будут заменены.\n" +
@@ -1968,7 +1984,7 @@
     if (!ok) return;
 
     var btn = this;
-    var applySeq = previewSeq, applyKey = connectedKey, applyDevice = lastInfo, applySource = currentScript, applyGeo = currentGeoPreview;
+    var applySeq = previewSeq, applyKey = connectedKey, applyDevice = lastInfo, applySource = currentScript, applyGeo = currentGeoPreview, applyRadius = currentRadiusPreview;
     function currentApply() {
       return previewSeq === applySeq && connectedKey === applyKey && connectionKey() === applyKey && lastInfo === applyDevice && currentScript === applySource;
     }
@@ -1982,8 +1998,8 @@
 
     var applyConn = connPayload();
     applyConn.protocol = lastInfo.protocol || applyConn.protocol;
-    var body = geo ? {conn:applyConn, device:applyGeo.device, interfaces:applyGeo.interfaces, geoNat:applyGeo.geoNat, generatedAt:applyGeo.generatedAt, script:applySource} : {conn:applyConn, script:applySource};
-    fetch(geo ? "/api/geonat/apply" : "/api/apply", {
+    var body = geo ? {conn:applyConn, device:applyGeo.device, interfaces:applyGeo.interfaces, geoNat:applyGeo.geoNat, generatedAt:applyGeo.generatedAt, script:applySource} : radius ? {conn:applyConn, device:applyRadius.device, interfaces:applyRadius.interfaces, pppRadius:applyRadius.pppRadius, generatedAt:applyRadius.generatedAt, script:applySource} : {conn:applyConn, script:applySource};
+    fetch(geo ? "/api/geonat/apply" : radius ? "/api/ppp-radius/apply" : "/api/apply", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
@@ -1994,6 +2010,11 @@
         okBox.style.display = "block";
         if (!currentApply()) {
           okBox.textContent = "Ранее запущенный скрипт на " + host + " завершился без ошибки. Это сообщение относится к прежним настройкам, а не к текущему предпросмотру. Проверьте роутер перед повторными действиями.";
+          return;
+        }
+        if (radius) {
+          okBox.textContent = "Команда RADIUS завершилась без ошибки на " + host + ". Это не подтверждает работу FreeRADIUS, AD, IPsec или VPN: проверьте настройки и вход тестового пользователя.";
+          setScriptState("проверить авторизацию", "good");
           return;
         }
         if (geo) {

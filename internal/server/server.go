@@ -80,6 +80,7 @@ func NewMux(opt Options) http.Handler {
 	mux.HandleFunc("/api/geo/prefixes", handleGeoPrefixes)
 	mux.HandleFunc("/api/apply", handleApply(ver))
 	mux.HandleFunc("/api/geonat/apply", handleGeoNATApply(ver))
+	mux.HandleFunc("/api/ppp-radius/apply", handlePPPRadiusApply(ver))
 	mux.HandleFunc("/api/log", handleLog(ver))
 
 	return withSecurityHeaders(mux)
@@ -323,6 +324,38 @@ func handleGeoNATApply(ver string) http.HandlerFunc {
 			Script   string `json:"script"`
 			Version  string `json:"version,omitempty"`
 		}{true, proto, mikrotik.ScriptName(), ver})
+	}
+}
+
+// handlePPPRadiusApply only accepts a checked, regenerated RADIUS preview.
+func handlePPPRadiusApply(ver string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+			return
+		}
+		var req mikrotik.PPPRadiusApplyRequest
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, apiResponse{OK: false, Error: "некорректный запрос"})
+			return
+		}
+		if !applyGate.TryLock() {
+			writeJSON(w, http.StatusOK, apiResponse{OK: false, Error: "другое применение ещё выполняется; дождитесь его результата", Version: ver})
+			return
+		}
+		defer applyGate.Unlock()
+		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		defer cancel()
+		proto, err := mikrotik.ApplyPPPRadius(ctx, req)
+		if err != nil {
+			writeJSON(w, http.StatusOK, apiResponse{OK: false, Error: err.Error(), Version: ver})
+			return
+		}
+		writeJSON(w, http.StatusOK, struct {
+			OK       bool   `json:"ok"`
+			Protocol string `json:"protocol"`
+			Version  string `json:"version,omitempty"`
+		}{true, proto, ver})
 	}
 }
 

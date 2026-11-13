@@ -495,7 +495,7 @@ func TestOverlappingApplyIsRejected(t *testing.T) {
 	srv := newTestServer(t)
 	applyGate.Lock()
 	defer applyGate.Unlock()
-	for _, path := range []string{"/api/apply", "/api/geonat/apply"} {
+	for _, path := range []string{"/api/apply", "/api/geonat/apply", "/api/ppp-radius/apply"} {
 		resp, err := http.Post(srv.URL+path, "application/json", strings.NewReader(`{}`))
 		if err != nil {
 			t.Fatal(err)
@@ -637,7 +637,7 @@ func TestPPPRadiusPreviewHTTPApplyBlocked(t *testing.T) {
 	var preview mikrotik.ConfigResult
 	err = json.NewDecoder(resp.Body).Decode(&preview)
 	resp.Body.Close()
-	if err != nil || !preview.OK || !strings.Contains(preview.Script, "MTI-PPP-RADIUS-PREVIEW-ONLY") {
+	if err != nil || !preview.OK || !strings.Contains(preview.Script, "MTI-PPP-RADIUS-GUARDED-APPLY") {
 		t.Fatalf("%+v %v", preview, err)
 	}
 	body := map[string]any{"conn": mikrotik.Params{Host: "127.0.0.1", User: "admin", Protocol: "api", APIPort: 1}, "script": preview.Script}
@@ -652,7 +652,79 @@ func TestPPPRadiusPreviewHTTPApplyBlocked(t *testing.T) {
 	}
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	resp.Body.Close()
-	if err != nil || result.OK || !strings.Contains(result.Error, "только для предпросмотра") || strings.Contains(result.Error, settings.Secret) {
+	if err != nil || result.OK || !strings.Contains(result.Error, "общий endpoint") || strings.Contains(result.Error, settings.Secret) {
 		t.Fatalf("%+v %v", result, err)
+	}
+}
+
+func TestPPPRadiusGuardedApplyHTTP(t *testing.T) {
+	var written string
+	router := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /rest/system/identity":
+			fmt.Fprint(w, `{"name":"router"}`)
+		case "GET /rest/system/resource":
+			fmt.Fprint(w, `{"version":"7.15","architecture-name":"arm","board-name":"hAP"}`)
+		case "GET /rest/interface/l2tp-server/server":
+			fmt.Fprint(w, `{"enabled":true,"use-ipsec":"required"}`)
+		case "GET /rest/ppp/aaa":
+			fmt.Fprint(w, `{"use-radius":false}`)
+		case "GET /rest/radius", "GET /rest/system/script":
+			fmt.Fprint(w, `[]`)
+		case "POST /rest/system/script/remove", "POST /rest/system/script/run":
+			fmt.Fprint(w, `{}`)
+		case "PUT /rest/system/script":
+			var p struct {
+				Source string `json:"source"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&p)
+			written = p.Source
+			fmt.Fprint(w, `{}`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(500)
+		}
+	}))
+	defer router.Close()
+	u, _ := url.Parse(router.URL)
+	_, ps, _ := net.SplitHostPort(u.Host)
+	port, _ := strconv.Atoi(ps)
+	dev := &mikrotik.Info{Protocol: "rest", Identity: "router", RouterOS: "7.15", Architecture: "arm", Diagnostics: &mikrotik.IdentityDiagnostics{ResourceBoard: "hAP"}, Packages: []mikrotik.Package{{Name: "routeros"}}}
+	radius := mikrotik.PPPRadiusSettings{Enabled: true, Address: "192.0.2.10", AuthenticationPort: "1812", AccountingPort: "1813", Secret: "StrongUniqueSecret_123456", Acknowledged: true}
+	app := newTestServer(t)
+	post := func(path string, body any, out any) {
+		t.Helper()
+		b, e := json.Marshal(body)
+		if e != nil {
+			t.Fatal(e)
+		}
+		resp, e := http.Post(app.URL+path, "application/json", bytes.NewReader(b))
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer resp.Body.Close()
+		if e = json.NewDecoder(resp.Body).Decode(out); e != nil {
+			t.Fatal(e)
+		}
+	}
+	var preview mikrotik.ConfigResult
+	post("/api/config", mikrotik.ConfigRequest{Device: dev, Settings: mikrotik.Settings{PPPRadius: radius}}, &preview)
+	if !preview.OK || preview.GeneratedAt.IsZero() {
+		t.Fatalf("preview %+v", preview)
+	}
+	req := mikrotik.PPPRadiusApplyRequest{Conn: mikrotik.Params{Host: "127.0.0.1", RESTPort: port, User: "admin", Protocol: "rest"}, Device: dev, Radius: radius, GeneratedAt: preview.GeneratedAt, Script: preview.Script}
+	var out struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	post("/api/ppp-radius/apply", req, &out)
+	if !out.OK || written != preview.Script {
+		t.Fatalf("apply %+v", out)
+	}
+	req.Script += "\n:put 1"
+	out.OK = false
+	post("/api/ppp-radius/apply", req, &out)
+	if out.OK || !strings.Contains(out.Error, "предпросмотр") || strings.Contains(out.Error, radius.Secret) {
+		t.Fatalf("tampered %+v", out)
 	}
 }

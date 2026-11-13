@@ -35,8 +35,8 @@ func ApplyScript(ctx context.Context, p Params, source string) (string, error) {
 	if strings.Contains(source, "# MTI-GEONAT-IMPORT-ONLY") || strings.Contains(source, "# MTI-GEONAT-GUARDED-APPLY") {
 		return "", fmt.Errorf("белый список NAT нельзя применять через общий endpoint: используйте кнопку с проверкой проброса")
 	}
-	if strings.Contains(source, "# MTI-PPP-RADIUS-PREVIEW-ONLY") {
-		return "", fmt.Errorf("RADIUS PPP доступен только для предпросмотра: требуется проверка существующей конфигурации и план восстановления")
+	if strings.Contains(source, "# MTI-PPP-RADIUS-PREVIEW-ONLY") || strings.Contains(source, "# MTI-PPP-RADIUS-GUARDED-APPLY") {
+		return "", fmt.Errorf("RADIUS PPP нельзя применять через общий endpoint: используйте кнопку с проверкой")
 	}
 	if strings.Contains(source, "# MTI-LAN-PREVIEW-ONLY") {
 		return "", fmt.Errorf("изменение LAN доступно только для предпросмотра: требуется проверка конфликтов и безопасное восстановление доступа")

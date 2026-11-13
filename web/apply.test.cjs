@@ -12,9 +12,9 @@ function between(start,end) {
 function setup() {
   const names=['btn-copy','btn-download','btn-apply','apply-reason','build-ok','build-error','host'];
   const el=Object.fromEntries(names.map(id=>[id,{disabled:false,style:{display:'none'},textContent:'',innerHTML:'', value:'192.0.2.1', addEventListener(type,fn){this.handler=fn}}]));
-  let resolveFetch, requests=0, geo=false, state='', lastRequest=null;
+  let resolveFetch, requests=0, geo=false, radiusOn=false, state='', lastRequest=null;
   const ctx=vm.createContext({
-    $:id=>el[id], chk:id=>id==='chk-geoNat'&&geo, applyInProgress:false, Blob, currentGeoPreview:null,
+    $:id=>el[id], chk:id=>(id==='chk-geoNat'&&geo)||(id==='chk-pppRadius'&&radiusOn), applyInProgress:false, Blob, currentGeoPreview:null, currentRadiusPreview:null,
     currentScript:':put 1', connectedKey:'key', lastInfo:{protocol:'api',routeros:'7.25.1'}, interfacesReady:true, previewSeq:1, previewTimer:null,
     connectionKey:()=> 'key', connPayload:()=>({host:'192.0.2.1'}),
     setScriptState:s=>{state=s}, protoLabel:p=>p, window:{confirm:()=>true},
@@ -24,7 +24,7 @@ function setup() {
   vm.runInContext(between('  function geoApplyIssue()', '  // ------------------------------------------------------------------\n  // предпросмотр'),ctx);
   vm.runInContext(between('  function schedulePreview()', '  function preview()'),ctx);
   vm.runInContext(between('  $("btn-apply").addEventListener("click"', '  loadPrefs();'),ctx);
-  return {ctx,el,resolve:res=>resolveFetch(res), selectGeo:()=>{geo=true}, requests:()=>requests, request:()=>lastRequest, state:()=>state};
+  return {ctx,el,resolve:res=>resolveFetch(res), selectGeo:()=>{geo=true}, selectRadius:()=>{radiusOn=true}, requests:()=>requests, request:()=>lastRequest, state:()=>state};
 }
 const settle=()=>new Promise(r=>setImmediate(r));
 (async()=>{
@@ -59,10 +59,16 @@ const settle=()=>new Promise(r=>setImmediate(r));
   assert.match(guarded.el['apply-reason'].textContent,/64 КиБ/);
   guarded.ctx.currentScript='# MTI-GEONAT-GUARDED-APPLY'; guarded.ctx.lastInfo.protocol='mac'; guarded.ctx.setActions(true); assert.equal(guarded.el['btn-apply'].disabled,true);
 
-  const radius=setup(); radius.ctx.currentScript='# MTI-PPP-RADIUS-PREVIEW-ONLY\n:put 1'; radius.ctx.setActions(true);
-  assert.equal(radius.el['btn-apply'].disabled,true); assert.match(radius.el['apply-reason'].textContent,/только предпросмотр/);
-  radius.el['btn-apply'].handler.call(radius.el['btn-apply']); assert.equal(radius.requests(),0);
-  assert.equal(radius.el['btn-copy'].disabled,false); assert.equal(radius.el['btn-download'].disabled,false);
+  const radius=setup(); radius.selectRadius(); radius.ctx.currentScript='# MTI-PPP-RADIUS-GUARDED-APPLY\n:put 1';
+  radius.ctx.currentRadiusPreview={device:radius.ctx.lastInfo,interfaces:[],pppRadius:{address:'192.0.2.10',secret:'private'},generatedAt:'2026-11-13T00:00:00Z'};
+  radius.ctx.setActions(true); assert.equal(radius.el['btn-apply'].disabled,false);
+  radius.el['btn-apply'].handler.call(radius.el['btn-apply']); assert.equal(radius.requests(),1); assert.equal(radius.request().url,'/api/ppp-radius/apply');
+  assert.equal(radius.request().body.pppRadius.address,'192.0.2.10'); radius.el['btn-apply'].handler.call(radius.el['btn-apply']);assert.equal(radius.requests(),1);
+  radius.resolve({json:()=>Promise.resolve({ok:true,protocol:'api'})}); await settle(); await settle();
+  assert.equal(radius.state(),'проверить авторизацию'); assert.match(radius.el['build-ok'].textContent,/не подтверждает работу FreeRADIUS/);
+  radius.ctx.lastInfo.protocol='mac';radius.ctx.setActions(true);assert.equal(radius.el['btn-apply'].disabled,true);assert.match(radius.el['apply-reason'].textContent,/API\/REST/);
+  const legacy=setup();legacy.ctx.currentScript='# MTI-PPP-RADIUS-PREVIEW-ONLY';legacy.ctx.setActions(true);assert.equal(legacy.el['btn-apply'].disabled,true);
+  legacy.el['btn-apply'].handler.call(legacy.el['btn-apply']);assert.equal(legacy.requests(),0);
 
   const normal=setup(); normal.el['btn-apply'].handler.call(normal.el['btn-apply']);
   normal.resolve({json:()=>Promise.resolve({ok:true,protocol:'api',script:'mti-apply'})});
