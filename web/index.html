@@ -284,6 +284,18 @@
 
     <div id="status" class="error-box"></div>
 
+    <section class="card" id="snapshot-compare-card">
+      <h2>Сравнение двух снимков</h2>
+      <div class="hint">Выберите два ранее сохранённых .txt снимка каналов и маршрутов. Сравнение выполняется локально, подключение к роутеру не требуется. Отчёты могут содержать частные адреса и комментарии; проверьте результат перед передачей.</div>
+      <div class="grid">
+        <label class="field">Первый снимок (до)<input type="file" id="compare-before" accept=".txt,text/plain"></label>
+        <label class="field">Второй снимок (после)<input type="file" id="compare-after" accept=".txt,text/plain"></label>
+      </div>
+      <div class="row"><button type="button" id="compare-run" disabled>Сравнить</button><button type="button" class="ghost" id="compare-copy" disabled>Скопировать результат</button><button type="button" class="ghost" id="compare-download" disabled>Скачать .txt</button></div>
+      <div class="hint">Сопоставляются строки известных разделов без учёта их порядковых номеров. Отсутствующие, ошибочные и усечённые разделы не считаются пустыми. Это не доказательство, что снимки сняты с одного устройства или что вся конфигурация совпадает.</div>
+      <pre id="compare-output" class="mono" aria-live="polite" style="white-space:pre-wrap;word-break:break-word;max-height:32rem;overflow:auto"></pre>
+    </section>
+
     <section id="result">
       <div class="card">
         <div class="table-head">
@@ -1782,6 +1794,112 @@
     document.body.appendChild(a); a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 0);
     flash(this, "Файл сохранён ✓");
+  });
+
+  // Snapshot comparison is local: input files never leave the browser.
+  var snapshotCompareSeq = 0, snapshotCompareText = "";
+  var snapshotCompareTitles = ["Интерфейсы", "IPv4-адреса", "DHCP-клиенты", "Маршруты по умолчанию и mti-probe-link", "Планировщик mti-failover", "Доступные переменные mti-failover", "DHCP-серверы", "IPv4-пулы", "DHCP-сети", "LTE: разовое чтение показателей", "История контроллера mti-failover (время роутера)"];
+
+  function parseSnapshotReport(text) {
+    var lines = text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n");
+    if (lines[0] !== "MikroTik Inspector — снимок каналов и маршрутов") throw new Error("Файл не похож на сохранённый снимок каналов и маршрутов MikroTik Inspector.");
+    var sections = Object.create(null), current = null, found = 0;
+    lines.slice(1).forEach(function (line) {
+      if (line.length > 8192) throw new Error("В снимке обнаружена слишком длинная строка.");
+      var title = line.endsWith(":") ? line.slice(0, -1) : "";
+      if (snapshotCompareTitles.indexOf(title) !== -1) {
+        if (sections[title]) throw new Error("Раздел «" + title + "» повторяется; файл нельзя однозначно разобрать.");
+        current = {rows:[], error:false, truncated:false, empty:false, invalid:false}; sections[title] = current; found++; return;
+      }
+      if (!current) return;
+      if (line === "") { current = null; return; }
+      if (!line.startsWith("  ")) { current.invalid = true; current = null; return; }
+      if (line.indexOf("  Не удалось прочитать") === 0 || line.indexOf("  Не прочитано:") === 0 || line.indexOf("  Доступно только для RouterOS") === 0) { current.error = true; return; }
+      if (line.indexOf("  Показаны ") === 0) { current.truncated = true; return; }
+      if (line === "  Записей не найдено.") { current.empty = true; return; }
+      var row = /^  [0-9]+\. (.+)$/.exec(line);
+      if (row && row[1].includes("=")) { if (current.rows.length >= 2000) current.invalid = true; else current.rows.push(row[1]); return; }
+      current.invalid = true;
+    });
+    if (current) current.invalid = true; // EOF can cut off a row or a section.
+    if (!found) throw new Error("В файле не обнаружены известные разделы снимка.");
+    sections.footerPresent = lines.some(function (line) { return line.startsWith("Переменные скрипта могут отсутствовать или быть устаревшими;"); });
+    snapshotCompareTitles.filter(function (k) { return !!sections[k]; }).forEach(function (k) {
+      var s = sections[k];
+      if ((s.empty && s.rows.length) || (!s.empty && !s.rows.length && !s.error)) s.invalid = true;
+    });
+    return sections;
+  }
+
+  function compareSnapshotReports(before, after) {
+    var a = parseSnapshotReport(before), b = parseSnapshotReport(after);
+    var lines = ["MikroTik Inspector — сравнение снимков", "Сопоставление только текстовых строк известных разделов; номера строк игнорируются.", "Это не проверка устройства, полного состояния, успешности изменений или работоспособности интернета."];
+    if (!a.footerPresent || !b.footerPresent) lines.push("Внимание: не найден завершающий текст в " + (!a.footerPresent && !b.footerPresent ? "обоих файлах" : !a.footerPresent ? "первом файле" : "втором файле") + "; возможны обрезка или другой формат.");
+    var compared = 0, unmatched = 0, incomplete = 0, emitted = 0, omitted = false;
+    function counts(rows) {
+      var m = new Map(); rows.forEach(function (r) { m.set(r, (m.get(r) || 0) + 1); }); return m;
+    }
+    snapshotCompareTitles.forEach(function (title) {
+      var x = a[title], y = b[title];
+      if (!x && !y && snapshotCompareTitles.indexOf(title) >= 9) return; // Optional sections.
+      lines.push("", title + ":");
+      if (!x || !y) { lines.push("  Нет раздела " + (!x && !y ? "в обоих снимках" : !x ? "в первом снимке" : "во втором снимке") + "; сравнение невозможно."); incomplete++; return; }
+      if (x.error || y.error || x.truncated || y.truncated || x.invalid || y.invalid) {
+        lines.push("  Один из разделов не прочитан, усечён или разобран неоднозначно; сравнение невозможно."); incomplete++; return;
+      }
+      compared++;
+      var left = counts(x.rows), right = counts(y.rows), keys = Array.from(new Set(x.rows.concat(y.rows))).sort(), n = 0;
+      keys.forEach(function (key) {
+        var diff = (left.get(key) || 0) - (right.get(key) || 0); if (!diff) return;
+        n += Math.abs(diff); unmatched += Math.abs(diff);
+        if (emitted < 400) { lines.push("  Только в " + (diff > 0 ? "первом" : "втором") + " (" + Math.abs(diff) + "): " + key); emitted++; } else { omitted = true; }
+      });
+      if (!n) lines.push("  Распознанные строки совпадают.");
+      else lines.push("  Несовпавших строк: " + n + ".");
+    });
+    if (omitted) lines.push("", "Вывод ограничен 400 различающимися строками; подробности не полные.");
+    lines.push("", "Сопоставлено разделов: " + compared + "; несовпавших строк: " + unmatched + "; недоступных для сравнения разделов: " + incomplete + ".",
+      "Отсутствующие поля (—) неизвестны; различие строк не доказывает добавление или удаление объекта. Изменения порядка строк игнорируются. Нельзя гарантировать обнаружение всех повреждений или ручных правок файлов. Проверьте, что снимки относятся к одному устройству и времени теста.");
+    return lines.join("\n");
+  }
+
+  function resetSnapshotComparison() {
+    snapshotCompareSeq++; snapshotCompareText = ""; $("compare-output").textContent = "";
+    $("compare-run").disabled = !($("compare-before").files.length && $("compare-after").files.length);
+    $("compare-copy").disabled = true; $("compare-download").disabled = true;
+  }
+  function readComparisonFile(file) {
+    return new Promise(function (resolve, reject) {
+      if (!file || file.size > 2 * 1024 * 1024) { reject(new Error("Выберите два файла .txt размером не более 2 МиБ каждый.")); return; }
+      var reader = new FileReader();
+      reader.onload = function () { resolve(String(reader.result || "")); };
+      reader.onerror = function () { reject(new Error("Не удалось прочитать файл.")); };
+      reader.onabort = function () { reject(new Error("Чтение файла прервано.")); };
+      reader.readAsText(file, "UTF-8");
+    });
+  }
+  ["compare-before", "compare-after"].forEach(function (id) { $(id).addEventListener("change", resetSnapshotComparison); });
+  $("compare-run").addEventListener("click", function () {
+    var first = $("compare-before").files[0], second = $("compare-after").files[0];
+    if (!first || !second || this.disabled) return;
+    var seq = ++snapshotCompareSeq, btn = this; snapshotCompareText = "";
+    btn.disabled = true; $("compare-copy").disabled = true; $("compare-download").disabled = true; $("compare-output").textContent = "Чтение файлов…";
+    Promise.all([readComparisonFile(first), readComparisonFile(second)]).then(function (texts) {
+      if (seq !== snapshotCompareSeq) return;
+      snapshotCompareText = compareSnapshotReports(texts[0], texts[1]); $("compare-output").textContent = snapshotCompareText;
+      $("compare-copy").disabled = false; $("compare-download").disabled = false;
+    }).catch(function (err) { if (seq === snapshotCompareSeq) $("compare-output").textContent = "Ошибка: " + (err.message || "не удалось сравнить снимки"); })
+      .finally(function () { if (seq === snapshotCompareSeq) btn.disabled = !($("compare-before").files.length && $("compare-after").files.length); });
+  });
+  $("compare-copy").addEventListener("click", function () {
+    if (!snapshotCompareText) return; var btn = this;
+    copyText(snapshotCompareText).then(function () { flash(btn, "Скопировано ✓"); }).catch(function () { showError("Не удалось скопировать результат"); });
+  });
+  $("compare-download").addEventListener("click", function () {
+    if (!snapshotCompareText) return;
+    var a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([snapshotCompareText], {type:"text/plain;charset=utf-8"}));
+    a.download = "mikrotik-snapshot-comparison.txt"; document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 0); flash(this, "Файл сохранён ✓");
   });
 
   // Only explicitly selected fields are exported; never serialize Params or Info wholesale.

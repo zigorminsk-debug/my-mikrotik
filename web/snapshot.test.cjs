@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const html = fs.readFileSync(require('node:path').join(__dirname, 'index.html'), 'utf8');
 const start = html.indexOf('  function clearNetworkSnapshot()');
-const end = html.indexOf('  // Only explicitly selected fields', start);
+const end = html.indexOf('  // Snapshot comparison is local', start);
 assert(start >= 0 && end > start);
 const names = ['snapshot-output','snapshot-run','snapshot-copy','snapshot-download','snapshot-history','snapshot-lte','appver'];
 const el = Object.fromEntries(names.map(n => [n, {textContent:'', disabled:false, addEventListener(type, fn) {this.handler=fn;}}]));
