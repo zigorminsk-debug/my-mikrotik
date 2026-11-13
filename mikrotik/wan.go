@@ -53,7 +53,7 @@ func validateWAN(s WANSettings, pppoe PPPoESettings) []string {
 		}
 		distances[r.Distance] = true
 		switch r.Mode {
-		case "lte":
+		case "lte", "usb-tether":
 			if r.CheckGateway {
 				problems = append(problems, "ping шлюза для LTE не поддерживается")
 			}
@@ -76,6 +76,11 @@ func validateWAN(s WANSettings, pppoe PPPoESettings) []string {
 		}
 		if len(problems) > 0 {
 			errs = append(errs, fmt.Sprintf("WAN, канал %d: %s", i+1, strings.Join(problems, ", ")))
+		}
+	}
+	for i, r := range s.Links {
+		if r.Mode == "usb-tether" && (i != 0 || !s.Failover || len(s.Links) != 2 || s.Links[1].Mode != "dhcp") {
+			errs = append(errs, "USB-модем: экспериментальный режим требует основной USB/LTE, резервный Ethernet DHCP и контроль интернета")
 		}
 	}
 	if pppoe.Enabled && pppoe.DefaultRoute {
@@ -108,7 +113,7 @@ func buildWAN(b *strings.Builder, s WANSettings, device *Info, ifaces []Iface) {
 	b.WriteString("# Сохраните export/backup. Проверьте существующие DHCP clients, адреса и default routes.\n# Меньшая distance — основной канал. DHCP переключается при потере lease/link.\n# check-gateway=ping проверяет только шлюз, НЕ интернет за ним.\n")
 	for i := 0; i < 2; i++ {
 		tag := fmt.Sprintf("mti-wan-%d", i)
-		if hasAnyIface(ifaces, func(f Iface) bool { return strings.EqualFold(f.Type, "lte") }) {
+		if (len(s.Links) == 0 || s.Links[0].Mode != "usb-tether") && hasAnyIface(ifaces, func(f Iface) bool { return strings.EqualFold(f.Type, "lte") }) {
 			fmt.Fprintf(b, "/interface lte apn set [find where name=%s] add-default-route=no\n", rosQuote(tag+"-apn"))
 		}
 		for _, path := range []string{"/ip dhcp-client", "/ip route", "/ip address", "/ip firewall nat"} {
@@ -117,7 +122,9 @@ func buildWAN(b *strings.Builder, s WANSettings, device *Info, ifaces []Iface) {
 	}
 	for i, r := range s.Links {
 		tag := attr("comment", fmt.Sprintf("mti-wan-%d", i))
-		if r.Mode == "lte" {
+		if r.Mode == "usb-tether" {
+			b.WriteString("# USB-модем: используем существующий динамический DHCP; APN не изменяется.\n")
+		} else if r.Mode == "lte" {
 			name := fmt.Sprintf("mti-wan-%d-apn", i)
 			fmt.Fprintf(b, ":if ([:len [/interface lte apn find where name=%s]] = 0) do={ /interface lte apn add %s %s }\n", rosQuote(name), attr("name", name), attr("apn", strings.TrimSpace(r.APN)))
 			fmt.Fprintf(b, "/interface lte apn set [find where name=%s] %s add-default-route=yes default-route-distance=%d use-peer-dns=no\n", rosQuote(name), attr("apn", strings.TrimSpace(r.APN)), r.Distance)
@@ -197,7 +204,7 @@ func validateWANInterfaces(s WANSettings, ifaces []Iface) []string {
 			found = true
 			lte := strings.EqualFold(f.Type, "lte")
 			ether := strings.EqualFold(f.Type, "ether") || strings.EqualFold(f.Type, "ethernet")
-			if (r.Mode == "lte" && !lte) || (r.Mode != "lte" && !ether) {
+			if ((r.Mode == "lte" || r.Mode == "usb-tether") && !lte) || (r.Mode != "lte" && r.Mode != "usb-tether" && !ether) {
 				errs = append(errs, fmt.Sprintf("WAN, канал %d: тип интерфейса не соответствует подключению", i+1))
 			}
 		}

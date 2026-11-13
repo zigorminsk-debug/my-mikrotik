@@ -601,6 +601,7 @@
                 <p>Без контроля интернета: DHCP реагирует на потерю lease/link; ping шлюза проверяет только шлюз. Контрольный узел должен отвечать на ICMP.
                 Существующий DHCP-клиент выбранного порта будет включён и обновлён: default route, distance и отключение peer DNS. Его комментарий сохраняется. Проверьте существующие маршруты перед применением.
                 Настройки DNS задаются отдельно. Снятие галочки не удаляет ранее применённые настройки.</p>
+                <div class="sec-note">USB-модем телефона — экспериментальный отдельный режим для RouterOS 7, только основной USB/LTE и резервный Ethernet DHCP. На устройстве ещё не проверен. Кнопка автоматического применения для него заблокирована; скопированный скрипт остаётся исполняемым. Перед любым применением сохраните backup и export, проверьте конфликтующие маршруты и локальный доступ; переключение может прервать соединения. APN телефона не изменяется. На обычные режимы режим не влияет.</div>
               </div>
             </div>
           </div>
@@ -1078,7 +1079,7 @@
      ["nat", "NAT masquerade", "checkbox"], ["checkGateway", "Ping шлюза (только static)", "checkbox"]].forEach(function (spec) {
       var label = document.createElement("label"); label.className = "field"; label.textContent = spec[1];
       var input = document.createElement(spec[2] === "select" ? "select" : "input");
-      if (spec[0] === "mode") [["dhcp","Проводной — DHCP"],["static","Проводной — статический IPv4"],["lte","LTE"]].forEach(function(v) {
+      if (spec[0] === "mode") [["dhcp","Проводной — DHCP"],["static","Проводной — статический IPv4"],["lte","LTE"],["usb-tether","USB-модем телефона — экспериментально"]].forEach(function(v) {
         var o = document.createElement("option"); o.value = v[0]; o.textContent = v[1]; input.appendChild(o);
       }); else if (spec[2] !== "select") input.type = spec[2];
       input.dataset.key = spec[0];
@@ -1089,7 +1090,7 @@
     row.appendChild(grid);
     row.updateMode = function () {
       var mode = row.querySelector('[data-key="mode"]').value;
-      var lte = mode === "lte";
+      var lte = mode === "lte" || mode === "usb-tether";
       var candidates = lastIfaces.filter(function(i) {
         var t = (i.type || "").toLowerCase();
         return lte ? t === "lte" : t === "ether" || t === "ethernet";
@@ -1100,7 +1101,7 @@
       sel.disabled = lte && candidates.length <= 1;
       ["address", "gateway", "checkGateway", "apn"].forEach(function (key) {
         var el = row.querySelector('[data-key="' + key + '"]');
-        var active = key === "apn" ? lte : mode === "static";
+        var active = key === "apn" ? mode === "lte" : mode === "static";
         el.disabled = !active; el.parentElement.hidden = !active;
         if (!active && key === "checkGateway") el.checked = false;
       });
@@ -1240,7 +1241,7 @@
 
   function setActions(enabled) {
     ["btn-copy", "btn-download"].forEach(function (id) { $(id).disabled = !enabled; });
-    $("btn-apply").disabled = !enabled || chk("chk-security") || chk("chk-geoNat");
+    $("btn-apply").disabled = !enabled || chk("chk-security") || chk("chk-geoNat") || currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1;
   }
 
   // ------------------------------------------------------------------
@@ -1284,7 +1285,7 @@
           err.textContent = "";
           currentScript = res.script || "";
           $("script").textContent = currentScript.length > 30000 ? currentScript.slice(0, 30000) + "\n\n# Предпросмотр сокращён. Полный скрипт доступен в .rsc и при копировании." : currentScript;
-          setScriptState(chk("chk-geoNat") ? "готов к скачиванию" : "готов к применению", "good");
+          setScriptState(currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 ? "только предпросмотр" : chk("chk-geoNat") ? "готов к скачиванию" : "готов к применению", "good");
           setActions(currentScript.indexOf("# Настройки не выбраны") < 0);
           if (currentScript.indexOf("# Настройки не выбраны") >= 0) setScriptState("нет включённых разделов");
         }
@@ -1871,7 +1872,7 @@
 
   $("btn-apply").addEventListener("click", function () {
     if (!lastInfo || !interfacesReady || connectedKey !== connectionKey()) { invalidateConnection(); return; }
-    if (!currentScript || chk("chk-security") || chk("chk-geoNat")) return;
+    if (!currentScript || chk("chk-security") || chk("chk-geoNat") || currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1) return;
     var host = $("host").value.trim();
     var ok = window.confirm(
       "Применить настройки на роутере " + host + "?\n\n" +

@@ -25,6 +25,10 @@ func buildFailover(b *strings.Builder, s WANSettings) {
 		return
 	}
 	primary := s.Links[0]
+	if primary.Mode == "usb-tether" {
+		buildUSBFailover(b, s)
+		return
+	}
 	upDistance := primary.Distance
 	if upDistance < 1 {
 		upDistance = 1

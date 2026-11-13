@@ -60,3 +60,16 @@ assert.equal(ctx.currentScript, '');
 assert.equal(ctx.actions, false);
 assert.match(ctx.error, /Подключитесь заново/);
 console.log('UI guards: OK');
+
+// Experimental USB scripts can be inspected/copied but not applied by the UI.
+const usbEls = Object.fromEntries(['btn-copy', 'btn-download', 'btn-apply'].map(id => [id, {disabled:false}]));
+const usbCtx = vm.createContext({$: id => usbEls[id], chk: () => false, currentScript: '# MTI-USB-PREVIEW-ONLY\n:put 1'});
+vm.runInContext(between('  function setActions(enabled)', '  // ------------------------------------------------------------------\n  // предпросмотр'), usbCtx);
+usbCtx.setActions(true);
+assert.equal(usbEls['btn-copy'].disabled, false);
+assert.equal(usbEls['btn-download'].disabled, false);
+assert.equal(usbEls['btn-apply'].disabled, true);
+usbCtx.currentScript = ':put 1'; usbCtx.setActions(true);
+assert.equal(usbEls['btn-apply'].disabled, false);
+assert.match(html, /usb-tether/);
+assert.match(html, /скопированный скрипт остаётся исполняемым/);
