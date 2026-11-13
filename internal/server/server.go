@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zigorminsk-debug/my-mikrotik/mikrotik"
@@ -30,6 +31,10 @@ type Options struct {
 	// WebRoot — файлы интерфейса (обычно web.Content()).
 	WebRoot fs.FS
 }
+
+// Both application paths replace the same mti-apply script. Refuse overlapping
+// writes in this process; this does not lock other applications or RouterOS.
+var applyGate sync.Mutex
 
 type apiResponse struct {
 	OK      bool           `json:"ok"`
@@ -74,6 +79,7 @@ func NewMux(opt Options) http.Handler {
 	mux.HandleFunc("/api/geo/countries", handleGeoCountries)
 	mux.HandleFunc("/api/geo/prefixes", handleGeoPrefixes)
 	mux.HandleFunc("/api/apply", handleApply(ver))
+	mux.HandleFunc("/api/geonat/apply", handleGeoNATApply(ver))
 	mux.HandleFunc("/api/log", handleLog(ver))
 
 	return withSecurityHeaders(mux)
@@ -285,6 +291,39 @@ func handleLog(ver string) http.HandlerFunc {
 	}
 }
 
+// handleGeoNATApply verifies the exact preview and router state before writes.
+func handleGeoNATApply(ver string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+			return
+		}
+		var req mikrotik.GeoApplyRequest
+		if err := json.NewDecoder(io.LimitReader(r.Body, 8<<20)).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, apiResponse{OK: false, Error: "некорректный запрос"})
+			return
+		}
+		if !applyGate.TryLock() {
+			writeJSON(w, http.StatusOK, apiResponse{OK: false, Error: "другое применение ещё выполняется; дождитесь его результата", Version: ver})
+			return
+		}
+		defer applyGate.Unlock()
+		ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+		defer cancel()
+		proto, err := mikrotik.ApplyGeoNAT(ctx, req)
+		if err != nil {
+			writeJSON(w, http.StatusOK, apiResponse{OK: false, Error: err.Error(), Version: ver})
+			return
+		}
+		writeJSON(w, http.StatusOK, struct {
+			OK       bool   `json:"ok"`
+			Protocol string `json:"protocol"`
+			Script   string `json:"script"`
+			Version  string `json:"version,omitempty"`
+		}{true, proto, mikrotik.ScriptName(), ver})
+	}
+}
+
 func handleApply(ver string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -299,6 +338,11 @@ func handleApply(ver string) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, apiResponse{OK: false, Error: "некорректный запрос: " + err.Error()})
 			return
 		}
+		if !applyGate.TryLock() {
+			writeJSON(w, http.StatusOK, apiResponse{OK: false, Error: "другое применение ещё выполняется; дождитесь его результата", Version: ver})
+			return
+		}
+		defer applyGate.Unlock()
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
 

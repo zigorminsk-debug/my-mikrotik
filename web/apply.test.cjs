@@ -12,24 +12,24 @@ function between(start,end) {
 function setup() {
   const names=['btn-copy','btn-download','btn-apply','apply-reason','build-ok','build-error','host'];
   const el=Object.fromEntries(names.map(id=>[id,{disabled:false,style:{display:'none'},textContent:'',innerHTML:'', value:'192.0.2.1', addEventListener(type,fn){this.handler=fn}}]));
-  let resolveFetch, requests=0, geo=false, state='';
+  let resolveFetch, requests=0, geo=false, state='', lastRequest=null;
   const ctx=vm.createContext({
-    $:id=>el[id], chk:id=>id==='chk-geoNat'&&geo, applyInProgress:false,
-    currentScript:':put 1', connectedKey:'key', lastInfo:{protocol:'api'}, interfacesReady:true, previewSeq:1, previewTimer:null,
+    $:id=>el[id], chk:id=>id==='chk-geoNat'&&geo, applyInProgress:false, Blob, currentGeoPreview:null,
+    currentScript:':put 1', connectedKey:'key', lastInfo:{protocol:'api',routeros:'7.25.1'}, interfacesReady:true, previewSeq:1, previewTimer:null,
     connectionKey:()=> 'key', connPayload:()=>({host:'192.0.2.1'}),
     setScriptState:s=>{state=s}, protoLabel:p=>p, window:{confirm:()=>true},
     clearTimeout(){}, setTimeout(){return 1}, preview(){}, invalidateConnection(){throw Error('invalidated')},
-    fetch:(url,opts)=>{ requests++; assert.equal(url,'/api/apply'); assert.equal(JSON.parse(opts.body).script,':put 1'); return new Promise(resolve=>{resolveFetch=resolve}); },
+    fetch:(url,opts)=>{ requests++; lastRequest={url,body:JSON.parse(opts.body)}; return new Promise(resolve=>{resolveFetch=resolve}); },
   });
-  vm.runInContext(between('  function setActions(enabled)', '  // ------------------------------------------------------------------\n  // предпросмотр'),ctx);
+  vm.runInContext(between('  function geoApplyIssue()', '  // ------------------------------------------------------------------\n  // предпросмотр'),ctx);
   vm.runInContext(between('  function schedulePreview()', '  function preview()'),ctx);
   vm.runInContext(between('  $("btn-apply").addEventListener("click"', '  loadPrefs();'),ctx);
-  return {ctx,el,resolve:res=>resolveFetch(res), selectGeo:()=>{geo=true}, requests:()=>requests, state:()=>state};
+  return {ctx,el,resolve:res=>resolveFetch(res), selectGeo:()=>{geo=true}, requests:()=>requests, request:()=>lastRequest, state:()=>state};
 }
 const settle=()=>new Promise(r=>setImmediate(r));
 (async()=>{
   const h=setup(); h.ctx.setActions(true); h.el['btn-apply'].handler.call(h.el['btn-apply']);
-  assert.equal(h.requests(),1); assert.equal(h.el['btn-apply'].disabled,true);
+  assert.equal(h.requests(),1); assert.equal(h.request().url,'/api/apply'); assert.equal(h.request().body.script,':put 1'); assert.equal(h.el['btn-apply'].disabled,true);
   h.el['btn-apply'].handler.call(h.el['btn-apply']); assert.equal(h.requests(),1);
   h.selectGeo(); h.ctx.schedulePreview(); h.ctx.currentScript='# MTI-GEONAT-IMPORT-ONLY'; h.ctx.setActions(true);
   assert.equal(h.el['btn-apply'].disabled,true);
@@ -37,7 +37,7 @@ const settle=()=>new Promise(r=>setImmediate(r));
   await settle(); await settle();
   assert.match(h.el['build-ok'].textContent,/прежним настройкам/);
   assert.notEqual(h.state(),'применено');
-  assert.equal(h.el['btn-apply'].disabled,true); assert.match(h.el['apply-reason'].textContent,/автоматическое применение отключено/);
+  assert.equal(h.el['btn-apply'].disabled,true); assert.match(h.el['apply-reason'].textContent,/обновите предпросмотр/);
   h.ctx.schedulePreview(); assert.equal(h.el['build-ok'].style.display,'none');
 
   const failure=setup(); failure.el['btn-apply'].handler.call(failure.el['btn-apply']);
@@ -47,6 +47,17 @@ const settle=()=>new Promise(r=>setImmediate(r));
   assert.match(failure.el['build-error'].textContent,/частично/);
   assert.match(failure.el['build-error'].textContent,/предыдущему запросу/);
   assert.notEqual(failure.state(),'ошибка применения');
+
+  const guarded=setup(); guarded.selectGeo(); guarded.ctx.currentScript='# MTI-GEONAT-GUARDED-APPLY\n:put 1';
+  guarded.ctx.currentGeoPreview={device:guarded.ctx.lastInfo,interfaces:[{name:'ether1'}],geoNat:{destination:'192.168.88.5',port:'3389',wan:'ether1'},generatedAt:'2026-11-13T00:00:00Z'};
+  guarded.ctx.setActions(true); assert.equal(guarded.el['btn-apply'].disabled,false);
+  guarded.el['btn-apply'].handler.call(guarded.el['btn-apply']); assert.equal(guarded.request().url,'/api/geonat/apply');
+  assert.equal(guarded.request().body.geoNat.destination,'192.168.88.5'); assert.equal(guarded.request().body.script,guarded.ctx.currentScript);
+  guarded.resolve({json:()=>Promise.resolve({ok:true,protocol:'api',script:'mti-apply'})});
+  await settle(); await settle(); assert.equal(guarded.state(),'проверить правила'); assert.match(guarded.el['build-ok'].textContent,/не проверяет реальную защиту/);
+  guarded.ctx.currentScript='# MTI-GEONAT-GUARDED-APPLY'+'x'.repeat(65537); guarded.ctx.setActions(true); assert.equal(guarded.el['btn-apply'].disabled,true);
+  assert.match(guarded.el['apply-reason'].textContent,/64 КиБ/);
+  guarded.ctx.currentScript='# MTI-GEONAT-GUARDED-APPLY'; guarded.ctx.lastInfo.protocol='mac'; guarded.ctx.setActions(true); assert.equal(guarded.el['btn-apply'].disabled,true);
 
   const normal=setup(); normal.el['btn-apply'].handler.call(normal.el['btn-apply']);
   normal.resolve({json:()=>Promise.resolve({ok:true,protocol:'api',script:'mti-apply'})});

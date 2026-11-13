@@ -32,8 +32,8 @@ func ApplyScript(ctx context.Context, p Params, source string) (string, error) {
 		return "", err
 	}
 	source = strings.TrimSpace(source)
-	if strings.Contains(source, "# MTI-GEONAT-IMPORT-ONLY") {
-		return "", fmt.Errorf("белый список NAT нельзя применять автоматически: проверьте правила и импортируйте отдельно при наличии безопасного локального доступа")
+	if strings.Contains(source, "# MTI-GEONAT-IMPORT-ONLY") || strings.Contains(source, "# MTI-GEONAT-GUARDED-APPLY") {
+		return "", fmt.Errorf("белый список NAT нельзя применять через общий endpoint: используйте кнопку с проверкой проброса")
 	}
 	if strings.Contains(source, "# MTI-LAN-PREVIEW-ONLY") {
 		return "", fmt.Errorf("изменение LAN доступно только для предпросмотра: требуется проверка конфликтов и безопасное восстановление доступа")
@@ -100,7 +100,10 @@ func applyAPI(ctx context.Context, p *Params, source string) error {
 	if err := c.login(p.User, p.Password); err != nil {
 		return err
 	}
+	return applyAPIClient(c, source)
+}
 
+func applyAPIClient(c *apiClient, source string) error {
 	// Старый скрипт может отсутствовать — ошибку этого шага игнорируем.
 	// Имя в numbers понимают не все версии, поэтому сначала пробуем по .id:
 	// иначе повторное применение после неудачи падает на создании скрипта
@@ -136,7 +139,10 @@ func applyREST(ctx context.Context, p *Params, source string) error {
 	if err != nil {
 		return err
 	}
+	return applyRESTClient(ctx, rc, source)
+}
 
+func applyRESTClient(ctx context.Context, rc *restClient, source string) error {
 	// Удаление старого скрипта — может отсутствовать, ошибку игнорируем.
 	// Снимаем по .id: оставшийся после неудачи скрипт иначе не даёт создать
 	// новый (HTTP 400 «already exists»).

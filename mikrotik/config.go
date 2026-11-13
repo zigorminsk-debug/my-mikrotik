@@ -94,12 +94,13 @@ type ConfigRequest struct {
 
 // ConfigResult — результат генерации.
 type ConfigResult struct {
-	OK       bool          `json:"ok"`
-	Script   string        `json:"script,omitempty"`
-	Error    string        `json:"error,omitempty"`
-	Features []FeatureInfo `json:"features,omitempty"`
-	Derived  *Derived      `json:"derived,omitempty"`
-	Skipped  []SkippedInfo `json:"skipped,omitempty"`
+	OK          bool          `json:"ok"`
+	Script      string        `json:"script,omitempty"`
+	Error       string        `json:"error,omitempty"`
+	Features    []FeatureInfo `json:"features,omitempty"`
+	Derived     *Derived      `json:"derived,omitempty"`
+	GeneratedAt time.Time     `json:"generatedAt"`
+	Skipped     []SkippedInfo `json:"skipped,omitempty"`
 }
 
 // FeatureInfo — доступность раздела конструктора на этом устройстве.
@@ -604,7 +605,7 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 		}
 	}
 
-	res := &ConfigResult{OK: true, Features: features}
+	res := &ConfigResult{OK: true, Features: features, GeneratedAt: now.UTC()}
 	var errs []string
 	if s.WAN.Enabled && avail["wan"] {
 		errs = append(errs, validateWAN(s.WAN, s.PPPoE)...)

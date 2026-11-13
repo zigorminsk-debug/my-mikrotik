@@ -549,7 +549,7 @@
                 <div class="actions"><button type="button" class="ghost" id="geo-load">Загрузить IP выбранных стран</button></div>
                 <div id="geo-status" class="sec-note">Страны можно не выбирать, если указаны отдельные адреса.</div>
                 <label class="checkbox"><input type="checkbox" id="geo-ack"> Я проверил ресурс, WAN-интерфейс и сохранил резервную копию</label>
-                <div class="sec-note">Выключите другие разделы: это отдельный скрипт для одного существующего dst-nat, он не создаёт проброс. Правила затрагивают только выбранный WAN, внутренний IPv4, порт и протокол; их accept имеет приоритет над существующими правилами. Все пробросы на этот внутренний адрес и порт через выбранный WAN попадут под правило, независимо от внешнего порта. IPv6, непроброшенные соединения и другие WAN не защищены. Уже работающие FastTrack-соединения могут сохраняться до очистки conntrack. Для каждого другого ресурса используйте отдельный идентификатор. Страны определяются по RIR-делегированию адресов: геолокация приблизительная, VPN/proxy её обходят. Обновляйте список вручную (кэш данных — 12 часов). Кнопка «Применить» для этого раздела отключена. Большие скрипты загружайте как .rsc и импортируйте локально; Safe Mode не рассчитан на тысячи изменений.</div>
+                <div class="sec-note">Выключите другие разделы: это отдельный скрипт для одного существующего dst-nat, он не создаёт проброс. Правила затрагивают только выбранный WAN, внутренний IPv4, порт и протокол; их accept имеет приоритет над существующими правилами. Все пробросы на этот внутренний адрес и порт через выбранный WAN попадут под правило, независимо от внешнего порта. IPv6, непроброшенные соединения и другие WAN не защищены. Уже работающие FastTrack-соединения могут сохраняться до очистки conntrack. Для каждого другого ресурса используйте отдельный идентификатор. Страны определяются по RIR-делегированию адресов: геолокация приблизительная, VPN/proxy её обходят. Обновляйте список вручную (кэш данных — 12 часов). Кнопка «Применить» проверяет устройство и наличие подходящего dst-nat перед изменением правил; она доступна для RouterOS 7 по API/REST при размере скрипта до 64 КиБ. Проверка не доказывает достижимость сервиса и не обеспечивает автоматический откат. Для MAC и больших скриптов доступен .rsc. Safe Mode не рассчитан на тысячи изменений.</div>
               </div>
             </div>
           </div>
@@ -686,6 +686,7 @@
   var lastIfaces = [];      // интерфейсы
   var features = {};        // доступность разделов
   var currentScript = "";   // актуальный скрипт
+  var currentGeoPreview = null; // точные параметры последнего предпросмотра
   var previewTimer = null;
   var previewSeq = 0;
   var connectedKey = null;  // bound to all connection fields, including the password; never persisted
@@ -833,7 +834,7 @@
     interfacesReady = false;
     lastInfo = null;
     lastIfaces = [];
-    currentScript = "";
+    currentScript = ""; currentGeoPreview = null;
     clearTimeout(previewTimer);
     previewSeq++;
     setActions(false);
@@ -1246,11 +1247,19 @@
     pill.className = "pill" + (cls ? " " + cls : "");
   }
 
+  function geoApplyIssue() {
+    if (!currentGeoPreview || !currentGeoPreview.generatedAt || currentScript.indexOf("# MTI-GEONAT-GUARDED-APPLY") < 0) return "Сначала обновите предпросмотр белого списка.";
+    if (!lastInfo || (lastInfo.protocol !== "api" && lastInfo.protocol !== "rest")) return "Белый список автоматически применяется только через API или REST; для MAC доступен файл .rsc.";
+    if (!(lastInfo.routeros || "").startsWith("7.")) return "Автоматическое применение белого списка доступно только для RouterOS 7.";
+    if (new Blob([currentScript]).size > 65536) return "Скрипт больше 64 КиБ: уменьшите список или после проверки используйте локальный импорт .rsc.";
+    return "";
+  }
+
   function setActions(enabled) {
     ["btn-copy", "btn-download"].forEach(function (id) { $(id).disabled = !enabled; });
     var reason = "";
     if (applyInProgress) reason = "Применение уже выполняется. Дождитесь результата.";
-    else if (enabled && chk("chk-geoNat")) reason = "Белый список NAT: автоматическое применение отключено. Доступен файл .rsc; перед импортом проверьте ресурс и правила в WinBox.";
+    else if (enabled && chk("chk-geoNat")) reason = geoApplyIssue();
     else if (enabled && chk("chk-security")) reason = "Защита WinBox: автоматическое применение отключено. Сначала проверьте скрипт и локальный доступ.";
     else if (enabled && currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1) reason = "Экспериментальный USB-режим доступен только для предпросмотра.";
     else if (enabled && currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1) reason = "Изменение LAN доступно только для предпросмотра до проверки безопасного восстановления доступа.";
@@ -1268,7 +1277,7 @@
     // A previous success is not evidence that the newly generated script ran.
     $("build-ok").style.display = "none";
     $("build-ok").textContent = "";
-    currentScript = "";
+    currentScript = ""; currentGeoPreview = null;
     setActions(false);
     if (lastInfo) setScriptState("обновление…");
     previewTimer = setTimeout(preview, 220);
@@ -1295,15 +1304,16 @@
           err.style.display = "block";
           err.textContent = "Проверьте настройки:\n· " + (res.error || "неизвестная ошибка").split("; ").join("\n· ");
           $("script").textContent = "";
-          currentScript = "";
+          currentScript = ""; currentGeoPreview = null;
           setScriptState("ошибки", "bad");
           setActions(false);
         } else {
           err.style.display = "none";
           err.textContent = "";
           currentScript = res.script || "";
+          currentGeoPreview = payload.settings.geoNat.enabled ? {device:payload.device, interfaces:payload.interfaces, geoNat:payload.settings.geoNat, generatedAt:res.generatedAt} : null;
           $("script").textContent = currentScript.length > 30000 ? currentScript.slice(0, 30000) + "\n\n# Предпросмотр сокращён. Полный скрипт доступен в .rsc и при копировании." : currentScript;
-          setScriptState((currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1) ? "только предпросмотр" : chk("chk-geoNat") ? "готов к скачиванию" : "готов к применению", "good");
+          setScriptState((currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1) ? "только предпросмотр" : chk("chk-geoNat") ? "готов к проверке" : "готов к применению", "good");
           setActions(currentScript.indexOf("# Настройки не выбраны") < 0);
           if (currentScript.indexOf("# Настройки не выбраны") >= 0) setScriptState("нет включённых разделов");
         }
@@ -1481,7 +1491,7 @@
     var key = connectedKey;
     var seq = ++interfaceSeq;
     interfacesReady = false;
-    currentScript = "";
+    currentScript = ""; currentGeoPreview = null;
     clearTimeout(previewTimer);
     previewSeq++;
     setActions(false);
@@ -1553,7 +1563,7 @@
     interfacesReady = false;
     interfaceSeq++;
     lastIfaces = [];
-    currentScript = "";
+    currentScript = ""; currentGeoPreview = null;
     clearTimeout(previewTimer);
     previewSeq++;
     setActions(false);
@@ -1904,17 +1914,25 @@
 
   $("btn-apply").addEventListener("click", function () {
     if (!lastInfo || !interfacesReady || connectedKey !== connectionKey()) { invalidateConnection(); return; }
-    if (applyInProgress || !currentScript || chk("chk-security") || chk("chk-geoNat") || currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1) return;
+    var geo = chk("chk-geoNat");
+    if (applyInProgress || !currentScript || chk("chk-security") || (geo && geoApplyIssue()) || (!geo && currentScript.indexOf("# MTI-GEONAT-GUARDED-APPLY") !== -1) || currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1) return;
     var host = $("host").value.trim();
-    var ok = window.confirm(
+    var prompt = geo ? (
+      "Применить белый список NAT на " + host + "?\n\n" +
+      "Программа проверит устройство и существующий dst-nat для " + currentGeoPreview.geoNat.destination + ":" + currentGeoPreview.geoNat.port + " через " + currentGeoPreview.geoNat.wan + ".\n" +
+      "Будут добавлены список адресов и правила в начале forward. Правило accept разрешает доверенные адреса выше существующего firewall; остальные блокируются. Все пробросы на этот адрес и порт через WAN подпадают под правила.\n" +
+      "IPv6 и сервисы роутера не защищены; действующие FastTrack/соединения могут сохраняться. Сбой может оставить частичные изменения; автоматического отката нет.\n\n" +
+      "Резервная копия сохранена и локальный доступ доступен?"
+    ) : (
       "Применить настройки на роутере " + host + "?\n\n" +
       "Будет создан и выполнен скрипт mti-apply. Объекты mti-* будут заменены.\n" +
       "Перед применением можно сохранить резервную копию: /system backup save name=before-mti"
     );
+    var ok = window.confirm(prompt);
     if (!ok) return;
 
     var btn = this;
-    var applySeq = previewSeq, applyKey = connectedKey, applyDevice = lastInfo, applySource = currentScript;
+    var applySeq = previewSeq, applyKey = connectedKey, applyDevice = lastInfo, applySource = currentScript, applyGeo = currentGeoPreview;
     function currentApply() {
       return previewSeq === applySeq && connectedKey === applyKey && connectionKey() === applyKey && lastInfo === applyDevice && currentScript === applySource;
     }
@@ -1928,10 +1946,11 @@
 
     var applyConn = connPayload();
     applyConn.protocol = lastInfo.protocol || applyConn.protocol;
-    fetch("/api/apply", {
+    var body = geo ? {conn:applyConn, device:applyGeo.device, interfaces:applyGeo.interfaces, geoNat:applyGeo.geoNat, generatedAt:applyGeo.generatedAt, script:applySource} : {conn:applyConn, script:applySource};
+    fetch(geo ? "/api/geonat/apply" : "/api/apply", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conn: applyConn, script: applySource })
+      body: JSON.stringify(body)
     })
       .then(function (r) { return r.json(); })
       .then(function (res) {
@@ -1939,6 +1958,11 @@
         okBox.style.display = "block";
         if (!currentApply()) {
           okBox.textContent = "Ранее запущенный скрипт на " + host + " завершился без ошибки. Это сообщение относится к прежним настройкам, а не к текущему предпросмотру. Проверьте роутер перед повторными действиями.";
+          return;
+        }
+        if (geo) {
+          okBox.textContent = "Команда белого списка завершилась без ошибки на " + host + ". Проверьте созданные правила в WinBox и новые соединения: приложение не проверяет реальную защиту или доступность сервиса.";
+          setScriptState("проверить правила", "good");
           return;
         }
         if (res.protocol === "mac") {

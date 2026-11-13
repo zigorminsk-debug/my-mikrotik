@@ -28,8 +28,9 @@ func routerTLSConfig() *tls.Config {
 
 // apiClient — синхронный клиент RouterOS API (бинарный протокол).
 type apiClient struct {
-	conn net.Conn
-	ctx  context.Context
+	conn      net.Conn
+	ctx       context.Context
+	opTimeout time.Duration // 0 retains the ordinary API deadline
 }
 
 func dialAPI(ctx context.Context, p *Params) (*apiClient, error) {
@@ -60,7 +61,11 @@ func (c *apiClient) Close() error {
 // чтобы не рассинхронизировать поток), !fatal (соединение закрывается),
 // !empty (нет записей).
 func (c *apiClient) exec(words ...string) (records []map[string]string, done map[string]string, err error) {
-	deadline := time.Now().Add(apiOpTimeout)
+	opTimeout := c.opTimeout
+	if opTimeout <= 0 {
+		opTimeout = apiOpTimeout
+	}
+	deadline := time.Now().Add(opTimeout)
 	if dl, ok := c.ctx.Deadline(); ok && dl.Before(deadline) {
 		deadline = dl
 	}

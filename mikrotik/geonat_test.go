@@ -62,12 +62,12 @@ func TestGeoNATResourceIsolation(t *testing.T) {
 	}
 }
 
-func TestGeoNATImportOnlyAndIsolation(t *testing.T) {
+func TestGeoNATGuardedAndIsolation(t *testing.T) {
 	dev := &Info{RouterOS: "7.15", Packages: []Package{{Name: "routeros"}}}
 	geo := GeoNATSettings{Enabled: true, Resource: "test", WAN: "ether1", Destination: "192.168.88.10", Port: "80", Protocol: "tcp", Manual: "203.0.113.4", Acknowledged: true}
 	ifaces := []Iface{{Name: "ether1", Type: "ether"}}
 	r := Generate(dev, ifaces, &Settings{GeoNAT: geo}, time.Now())
-	if !r.OK || !strings.Contains(r.Script, "# MTI-GEONAT-IMPORT-ONLY") {
+	if !r.OK || !strings.Contains(r.Script, "# MTI-GEONAT-GUARDED-APPLY") {
 		t.Fatalf("missing protection: %+v", r)
 	}
 	for _, extra := range []Settings{

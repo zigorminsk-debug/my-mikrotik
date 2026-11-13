@@ -45,9 +45,11 @@ func TestGeoNATMarkerRejectsAllTransports(t *testing.T) {
 		if protocol == "mac" {
 			host = "AA:BB:CC:DD:EE:FF"
 		}
-		_, err := ApplyScript(context.Background(), Params{Host: host, User: "test", Protocol: protocol}, "# MTI-GEONAT-IMPORT-ONLY\n:put 1")
-		if err == nil || !strings.Contains(err.Error(), "нельзя применять автоматически") {
-			t.Errorf("%s: %v", protocol, err)
+		for _, marker := range []string{"# MTI-GEONAT-IMPORT-ONLY", "# MTI-GEONAT-GUARDED-APPLY"} {
+			_, err := ApplyScript(context.Background(), Params{Host: host, User: "test", Protocol: protocol}, marker+"\n:put 1")
+			if err == nil || !strings.Contains(err.Error(), "нельзя применять через общий endpoint") {
+				t.Errorf("%s %s: %v", protocol, marker, err)
+			}
 		}
 	}
 }

@@ -137,8 +137,8 @@ func writeGeoNAT(b *strings.Builder, s GeoNATSettings, now time.Time) {
 	tag := fmt.Sprintf("%s%x", prefix, sum[:5])
 	list := tag
 	section(b, "IP / Firewall", "Белый список для dst-nat: "+s.Resource)
-	b.WriteString("# MTI-GEONAT-IMPORT-ONLY\n")
-	b.WriteString("# Только IPv4. Резервная копия обязательна; импортируйте локально, а не через API.\n")
+	b.WriteString("# MTI-GEONAT-GUARDED-APPLY\n")
+	b.WriteString("# Только IPv4. Резервная копия обязательна; автоматическое применение только после проверки приложения.\n")
 	b.WriteString("# Страны основаны на делегировании адресов RIR, а не на достоверном местоположении пользователя.\n")
 	if len(s.Countries) > 0 {
 		fmt.Fprintf(b, "# Страны: %s; источник ipverse/country-ip-blocks.\n", strings.Join(s.Countries, ","))

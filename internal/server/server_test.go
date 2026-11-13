@@ -9,11 +9,13 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/zigorminsk-debug/my-mikrotik/mikrotik"
 	"github.com/zigorminsk-debug/my-mikrotik/web"
 )
 
@@ -406,5 +408,106 @@ func TestNetworkSnapshotOverHTTP(t *testing.T) {
 	}
 	if resp.StatusCode != 200 || !strings.Contains(string(raw), `"name":"ether1"`) || strings.Contains(string(raw), "topsecret") {
 		t.Fatalf("response: %d %s", resp.StatusCode, raw)
+	}
+}
+
+func TestGeoNATApplyHTTPPreviewAndGuard(t *testing.T) {
+	var requests []string
+	var saved string
+	router := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch r.Method + " " + r.URL.Path {
+		case "GET /rest/system/identity":
+			fmt.Fprint(w, `[{"name":"router"}]`)
+		case "GET /rest/system/resource":
+			fmt.Fprint(w, `[{"version":"7.25.1","board-name":"hAP ac^2","architecture-name":"arm"}]`)
+		case "GET /rest/interface":
+			fmt.Fprint(w, `[{"name":"ether1","disabled":false}]`)
+		case "GET /rest/ip/address":
+			fmt.Fprint(w, `[{"address":"192.168.88.1/24"}]`)
+		case "GET /rest/ip/firewall/filter":
+			fmt.Fprint(w, `[]`)
+		case "GET /rest/ip/firewall/nat":
+			fmt.Fprint(w, `[{"chain":"dstnat","action":"dst-nat","disabled":false,"protocol":"tcp","to-addresses":"192.168.88.5","to-ports":"3389","in-interface":"ether1"}]`)
+		case "GET /rest/system/script":
+			fmt.Fprint(w, `[]`)
+		case "POST /rest/system/script/remove", "POST /rest/system/script/run":
+			fmt.Fprint(w, `{}`)
+		case "PUT /rest/system/script":
+			var body struct {
+				Source string `json:"source"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			saved = body.Source
+			fmt.Fprint(w, `{}`)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(500)
+		}
+	}))
+	defer router.Close()
+	u, _ := url.Parse(router.URL)
+	_, portStr, _ := net.SplitHostPort(u.Host)
+	port, _ := strconv.Atoi(portStr)
+	dev := &mikrotik.Info{Protocol: "rest", Identity: "router", RouterOS: "7.25.1", Architecture: "arm", Diagnostics: &mikrotik.IdentityDiagnostics{ResourceBoard: "hAP ac^2"}, Packages: []mikrotik.Package{{Name: "routeros"}}}
+	ifs := []mikrotik.Iface{{Name: "ether1", Type: "ether"}}
+	geo := mikrotik.GeoNATSettings{Enabled: true, Resource: "rdp", WAN: "ether1", Destination: "192.168.88.5", Port: "3389", Protocol: "tcp", Manual: "203.0.113.1", Acknowledged: true}
+	app := newTestServer(t)
+	post := func(path string, body any, out any) {
+		t.Helper()
+		b, e := json.Marshal(body)
+		if e != nil {
+			t.Fatal(e)
+		}
+		resp, e := http.Post(app.URL+path, "application/json", bytes.NewReader(b))
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer resp.Body.Close()
+		if e = json.NewDecoder(resp.Body).Decode(out); e != nil {
+			t.Fatal(e)
+		}
+	}
+	var preview mikrotik.ConfigResult
+	post("/api/config", mikrotik.ConfigRequest{Device: dev, Interfaces: ifs, Settings: mikrotik.Settings{GeoNAT: geo}}, &preview)
+	if !preview.OK || preview.GeneratedAt.IsZero() {
+		t.Fatalf("preview: %+v", preview)
+	}
+	req := mikrotik.GeoApplyRequest{Conn: mikrotik.Params{Host: "127.0.0.1", RESTPort: port, User: "admin", Protocol: "rest"}, Device: dev, Interfaces: ifs, Geo: geo, GeneratedAt: preview.GeneratedAt, Script: preview.Script}
+	var out struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	post("/api/geonat/apply", req, &out)
+	if !out.OK || saved != preview.Script {
+		t.Fatalf("apply=%+v, script match=%t; requests=%v", out, saved == preview.Script, requests)
+	}
+	before := len(requests)
+	req.Script += "\n:put 1"
+	out.OK = false
+	post("/api/geonat/apply", req, &out)
+	if out.OK || !strings.Contains(out.Error, "предпросмотр") || len(requests) != before {
+		t.Fatalf("changed preview not blocked: %+v %v", out, requests[before:])
+	}
+}
+
+func TestOverlappingApplyIsRejected(t *testing.T) {
+	srv := newTestServer(t)
+	applyGate.Lock()
+	defer applyGate.Unlock()
+	for _, path := range []string{"/api/apply", "/api/geonat/apply"} {
+		resp, err := http.Post(srv.URL+path, "application/json", strings.NewReader(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		err = json.NewDecoder(resp.Body).Decode(&m)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m["ok"] != false || !strings.Contains(fmt.Sprint(m["error"]), "другое применение") {
+			t.Fatalf("%s: %v", path, m)
+		}
 	}
 }
