@@ -59,6 +59,11 @@ const settle=()=>new Promise(r=>setImmediate(r));
   assert.match(guarded.el['apply-reason'].textContent,/64 КиБ/);
   guarded.ctx.currentScript='# MTI-GEONAT-GUARDED-APPLY'; guarded.ctx.lastInfo.protocol='mac'; guarded.ctx.setActions(true); assert.equal(guarded.el['btn-apply'].disabled,true);
 
+  const radius=setup(); radius.ctx.currentScript='# MTI-PPP-RADIUS-PREVIEW-ONLY\n:put 1'; radius.ctx.setActions(true);
+  assert.equal(radius.el['btn-apply'].disabled,true); assert.match(radius.el['apply-reason'].textContent,/только предпросмотр/);
+  radius.el['btn-apply'].handler.call(radius.el['btn-apply']); assert.equal(radius.requests(),0);
+  assert.equal(radius.el['btn-copy'].disabled,false); assert.equal(radius.el['btn-download'].disabled,false);
+
   const normal=setup(); normal.el['btn-apply'].handler.call(normal.el['btn-apply']);
   normal.resolve({json:()=>Promise.resolve({ok:true,protocol:'api',script:'mti-apply'})});
   await settle(); await settle(); assert.equal(normal.state(),'применено');

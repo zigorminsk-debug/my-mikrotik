@@ -587,6 +587,18 @@
 <div class="grid"><label class="field">CA-сертификат для .ovpn (PEM .crt)<input type="file" id="openvpn-ca-file" accept=".crt,.pem"></label><label class="field">Клиентский PKCS12 для .ovpn (если нужен)<input type="file" id="openvpn-p12-file" accept=".p12,.pfx"></label><label class="field">CN серверного сертификата для .ovpn<input id="openvpn-server-cn" placeholder="по умолчанию адрес сервера" spellcheck="false"></label></div>
 <div class="actions"><button type="button" class="ghost" id="btn-ovpn-export">Скачать профиль клиента .ovpn</button></div><div class="sec-note">Для OpenVPN 2.6+. Файл содержит логин, пароль и при выборе PKCS12 — закрытый ключ. Передавайте и храните его защищённо. Пароль PKCS12 клиент запросит при подключении.</div>
 <div class="sec-note">TCP или UDP и порт должны совпадать с настройками сервера. Режим IP, AES-256-CBC / SHA1; сервер должен поддерживать эти параметры. Импортируйте доверенный CA и при необходимости клиентский сертификат до применения. Маршруты и firewall настраиваются отдельно. Повторное применение требует ручного удаления подключения.</div></div></div>
+<div class="sec" data-feat="pppRadius">
+  <label class="sec-head" for="chk-pppRadius"><input type="checkbox" id="chk-pppRadius"><span class="sec-title">RADIUS для PPP VPN — FreeRADIUS / AD</span><span class="sec-path mono">/radius · /ppp aaa</span><span class="lock" hidden></span></label>
+  <div class="sec-body"><div class="grid">
+    <label class="field">IPv4 сервера FreeRADIUS<input id="radius-address" placeholder="192.168.88.20" spellcheck="false" autocomplete="off"></label>
+    <label class="field">UDP-порт аутентификации<input id="radius-auth-port" type="number" min="1" max="65535" value="1812"></label>
+    <label class="field">UDP-порт accounting<input id="radius-acct-port" type="number" min="1" max="65535" value="1813"></label>
+    <label class="field">Общий секрет (16–128 латинских букв, цифр, _ или -)<input id="radius-secret" type="password" autocomplete="new-password" spellcheck="false"></label>
+  </div>
+  <div class="warn-box"><b>Только предпросмотр.</b> Автоприменение отключено, но скачанный или скопированный скрипт исполняется вручную и может повлиять на доступ. Он включает RADIUS для всех серверов PPP, включая PPPoE, не только VPN. Локальные PPP-пользователи проверяются раньше RADIUS. При наличии любой записи /radius скрипт остановится. Для работы требуются уже настроенный VPN-сервер, FreeRADIUS, AD/LDAP и совпадающий метод аутентификации; здесь они не создаются.</div>
+  <label class="checkbox"><input id="radius-ack" type="checkbox"> Я понимаю влияние на все PPP-серверы, проверил резервную копию и имею локальный доступ</label>
+  <div class="sec-note">Секрет будет виден в предпросмотре, скопированном тексте и файле .rsc; не отправляйте их другим и храните защищённо. Классический RADIUS/UDP используйте только в доверенной защищённой сети. PPTP небезопасен; не включайте его ради этой настройки. LDAP bind не проверяет MS-CHAPv2: для AD обычно нужен FreeRADIUS + Samba/winbind. Автоматическая проверка конфликта и доступности ещё не реализована.</div></div>
+</div>
 <div class="sec" data-feat="pptp"><label class="sec-head" for="chk-pptp"><input type="checkbox" id="chk-pptp"><span class="sec-title">PPTP клиент</span><span class="sec-path mono">/interface pptp-client</span><span class="lock" hidden></span></label><div class="sec-body"><div class="grid"><label class="field">Адрес сервера<input id="pptp-server" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">Логин<input id="pptp-user" type="text" value="" autocomplete="off" spellcheck="false"></label><label class="field">Пароль<input id="pptp-password" type="password" value="" autocomplete="off" spellcheck="false"></label></div><div class="sec-note">PPTP устарел и небезопасен; по возможности используйте WireGuard. Маршруты и firewall настраиваются отдельно. Повторное применение требует ручного удаления подключения.</div></div></div>
           </div>
 
@@ -713,7 +725,7 @@
     ["uptime", "Аптайм"]
   ];
 
-  var FEATURES = ["backup", "lan", "dhcp", "dns", "ntp", "pppoe", "wifi", "portForward", "wan", "wgServer", "wgClient", "openvpn", "pptp", "ovpnCertificates", "security", "geoNat"];
+  var FEATURES = ["backup", "lan", "dhcp", "dns", "ntp", "pppoe", "wifi", "portForward", "wan", "wgServer", "wgClient", "openvpn", "pptp", "ovpnCertificates", "security", "geoNat", "pppRadius"];
   var DEFAULTS = { "dns-remote": true, "pppoe-route": true, "pppoe-dns": true, "pppoe-nat": true };
 
   // ------------------------------------------------------------------
@@ -839,6 +851,8 @@
     lastInfo = null;
     lastIfaces = [];
     currentScript = ""; currentGeoPreview = null;
+    var radiusSecret = $("radius-secret"); if (radiusSecret) radiusSecret.value = "";
+    var radiusAck = $("radius-ack"); if (radiusAck) radiusAck.checked = false;
     clearTimeout(previewTimer);
     previewSeq++;
     setActions(false);
@@ -1219,6 +1233,7 @@
         return rule;
       }) },
       backup: {enabled: chk("chk-backup"), recipient: val("backup-recipient"), from: val("backup-from"), smtpServer: val("backup-smtpServer"), smtpPort: val("backup-smtpPort"), smtpUser: val("backup-smtpUser"), smtpPass: $("backup-smtpPass").value, tls: val("backup-tls"), password: $("backup-password").value, time: val("backup-time"), interval: val("backup-interval")},
+      pppRadius: {enabled: chk("chk-pppRadius"), address: val("radius-address"), authenticationPort: val("radius-auth-port"), accountingPort: val("radius-acct-port"), secret: chk("chk-pppRadius") ? $("radius-secret").value : "", acknowledged: chk("radius-ack")},
       geoNat: {enabled: chk("chk-geoNat"), resource: val("geo-id"), wan: val("geo-wan"), destination: val("geo-destination"), port: val("geo-port"), protocol: val("geo-protocol"), countries: selectedGeoCountries(), countryPrefixes: loadedGeoKey === selectedGeoCountries().join(",") ? geoPrefixes : [], manual: $("geo-manual").value, acknowledged: chk("geo-ack")},
       security: {enabled: chk("chk-security"), wan: Array.from($("security-wan").selectedOptions).map(function (o) { return o.value; }), trusted: val("security-trusted"), winboxPort: val("security-port"), acknowledged: chk("security-ack")},
       lan: { enabled: chk("chk-lan"), iface: val("lan-iface"), address: val("lan-addr") },
@@ -1264,6 +1279,7 @@
     var reason = "";
     if (applyInProgress) reason = "Применение уже выполняется. Дождитесь результата.";
     else if (enabled && chk("chk-geoNat")) reason = geoApplyIssue();
+    else if (enabled && currentScript.indexOf("# MTI-PPP-RADIUS-PREVIEW-ONLY") !== -1) reason = "RADIUS PPP: только предпросмотр. Ручной скрипт исполняемый; до запуска проверьте все PPP, RADIUS и резервное восстановление.";
     else if (enabled && chk("chk-security")) reason = "Защита WinBox: автоматическое применение отключено. Сначала проверьте скрипт и локальный доступ.";
     else if (enabled && currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1) reason = "Экспериментальный USB-режим доступен только для предпросмотра.";
     else if (enabled && currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1) reason = "Изменение LAN доступно только для предпросмотра до проверки безопасного восстановления доступа.";
@@ -1317,7 +1333,7 @@
           currentScript = res.script || "";
           currentGeoPreview = payload.settings.geoNat.enabled ? {device:payload.device, interfaces:payload.interfaces, geoNat:payload.settings.geoNat, generatedAt:res.generatedAt} : null;
           $("script").textContent = currentScript.length > 30000 ? currentScript.slice(0, 30000) + "\n\n# Предпросмотр сокращён. Полный скрипт доступен в .rsc и при копировании." : currentScript;
-          setScriptState((currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1) ? "только предпросмотр" : chk("chk-geoNat") ? "готов к проверке" : "готов к применению", "good");
+          setScriptState((currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-PPP-RADIUS-PREVIEW-ONLY") !== -1) ? "только предпросмотр" : chk("chk-geoNat") ? "готов к проверке" : "готов к применению", "good");
           setActions(currentScript.indexOf("# Настройки не выбраны") < 0);
           if (currentScript.indexOf("# Настройки не выбраны") >= 0) setScriptState("нет включённых разделов");
         }
@@ -1426,6 +1442,7 @@
     var input = sec.querySelector('input[type=checkbox]');
     input.addEventListener("change", function () {
       sec.classList.toggle("on", input.checked);
+      if (id === "pppRadius" && !input.checked) $("radius-secret").value = "";
       schedulePreview();
     });
     head.addEventListener("click", function (ev) {
@@ -1435,6 +1452,7 @@
       if (input.disabled) return;
       input.checked = !input.checked;
       sec.classList.toggle("on", input.checked);
+      if (id === "pppRadius" && !input.checked) $("radius-secret").value = "";
       schedulePreview();
     });
   });
@@ -1453,6 +1471,10 @@
   document.querySelectorAll('.menu-group .sec[data-feat="wgServer"] input:not([type=checkbox]), .menu-group .sec[data-feat="wgClient"] input:not([type=checkbox]), .menu-group .sec[data-feat="openvpn"] input:not([type=checkbox]), .menu-group .sec[data-feat="pptp"] input:not([type=checkbox]), .menu-group .sec[data-feat="ovpnCertificates"] input:not([type=checkbox])').forEach(function (el) {
     el.addEventListener("input", schedulePreview);
     el.addEventListener("change", schedulePreview);
+  });
+
+  ["radius-address", "radius-auth-port", "radius-acct-port", "radius-secret", "radius-ack"].forEach(function (id) {
+    $(id).addEventListener("input", schedulePreview); $(id).addEventListener("change", schedulePreview);
   });
 
   ["security-wan", "security-trusted", "security-port", "security-ack"].forEach(function (id) {
@@ -1531,6 +1553,8 @@
     var info = lastInfo || {};
     $("devline").textContent = (info.model || "устройство") + " · RouterOS " + (info.routeros || "—");
     $("wifi-country").value = "BY";
+    $("radius-secret").value = "";
+    $("radius-ack").checked = false;
     // Never silently enable sections on a newly connected router. A previous
     // device may have had different LAN, credentials and interface roles.
     FEATURES.forEach(function (id) {
@@ -1927,7 +1951,7 @@
   $("btn-apply").addEventListener("click", function () {
     if (!lastInfo || !interfacesReady || connectedKey !== connectionKey()) { invalidateConnection(); return; }
     var geo = chk("chk-geoNat");
-    if (applyInProgress || !currentScript || chk("chk-security") || (geo && geoApplyIssue()) || (!geo && currentScript.indexOf("# MTI-GEONAT-GUARDED-APPLY") !== -1) || currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1) return;
+    if (applyInProgress || !currentScript || chk("chk-security") || (geo && geoApplyIssue()) || (!geo && currentScript.indexOf("# MTI-GEONAT-GUARDED-APPLY") !== -1) || currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-PPP-RADIUS-PREVIEW-ONLY") !== -1) return;
     var host = $("host").value.trim();
     var prompt = geo ? (
       "Применить белый список NAT на " + host + "?\n\n" +

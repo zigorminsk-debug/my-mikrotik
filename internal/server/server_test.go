@@ -624,3 +624,35 @@ func TestSnapshotLTEOptInHTTP(t *testing.T) {
 		}
 	}
 }
+
+func TestPPPRadiusPreviewHTTPApplyBlocked(t *testing.T) {
+	app := newTestServer(t)
+	settings := mikrotik.PPPRadiusSettings{Enabled: true, Address: "192.0.2.10", AuthenticationPort: "1812", AccountingPort: "1813", Secret: "StrongUniqueSecret_123456", Acknowledged: true}
+	req := mikrotik.ConfigRequest{Device: &mikrotik.Info{RouterOS: "7.15", Packages: []mikrotik.Package{{Name: "routeros"}}}, Settings: mikrotik.Settings{PPPRadius: settings}}
+	b, _ := json.Marshal(req)
+	resp, err := http.Post(app.URL+"/api/config", "application/json", bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var preview mikrotik.ConfigResult
+	err = json.NewDecoder(resp.Body).Decode(&preview)
+	resp.Body.Close()
+	if err != nil || !preview.OK || !strings.Contains(preview.Script, "MTI-PPP-RADIUS-PREVIEW-ONLY") {
+		t.Fatalf("%+v %v", preview, err)
+	}
+	body := map[string]any{"conn": mikrotik.Params{Host: "127.0.0.1", User: "admin", Protocol: "api", APIPort: 1}, "script": preview.Script}
+	b, _ = json.Marshal(body)
+	resp, err = http.Post(app.URL+"/api/apply", "application/json", bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	resp.Body.Close()
+	if err != nil || result.OK || !strings.Contains(result.Error, "только для предпросмотра") || strings.Contains(result.Error, settings.Secret) {
+		t.Fatalf("%+v %v", result, err)
+	}
+}

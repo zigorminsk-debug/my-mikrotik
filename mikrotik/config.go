@@ -71,6 +71,7 @@ type Settings struct {
 	PortForward      PortForwardSettings     `json:"portForward"`
 	Backup           BackupSettings          `json:"backup"`
 	GeoNAT           GeoNATSettings          `json:"geoNat"`
+	PPPRadius        PPPRadiusSettings       `json:"pppRadius"`
 	Security         SecuritySettings        `json:"security"`
 	LAN              LanSettings             `json:"lan"`
 	DHCP             DHCPSettings            `json:"dhcp"`
@@ -219,6 +220,7 @@ func AnalyzeFeatures(device *Info, ifaces []Iface) []FeatureInfo {
 		{ID: "wan", Title: "Интернет и резервный канал", Path: "/ip route", Package: "system/dhcp", Available: has("system") && has("dhcp"), Reason: reasonIf(!has("system") || !has("dhcp"), "system/dhcp")},
 		{ID: "portForward", Title: "Проброс портов", Path: "/ip firewall nat", Package: "system", Available: has("system") || device == nil, Reason: reasonIf(!has("system") && device != nil, "system")},
 		{ID: "backup", Title: "Бэкап по расписанию", Path: "/system scheduler", Package: "system", Available: has("system"), Reason: reasonIf(!has("system"), "system")},
+		{ID: "pppRadius", Title: "RADIUS для PPP VPN", Path: "/radius /ppp aaa", Package: "ppp", Available: has("ppp"), Reason: reasonIf(!has("ppp"), "ppp")},
 		{ID: "geoNat", Title: "Белый список для dst-nat", Path: "/ip firewall filter", Package: "system", Available: has("system"), Reason: reasonIf(!has("system"), "system")},
 		{ID: "security", Title: "Защита WAN и WinBox", Path: "/ip firewall filter", Package: "system", Available: has("system"), Reason: reasonIf(!has("system"), "system")},
 		{ID: featLAN, Title: "Адреса и подсеть", Path: "/ip address",
@@ -797,6 +799,9 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 		}
 		errs = append(errs, validateBackup(s.Backup, rosVersion)...)
 	}
+	if s.PPPRadius.Enabled {
+		errs = append(errs, validatePPPRadius(s.PPPRadius, s)...)
+	}
 	if s.GeoNAT.Enabled && avail["geoNat"] {
 		errs = append(errs, validateGeoNAT(s.GeoNAT, ifaces, s)...)
 	}
@@ -843,6 +848,8 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 			enabled = s.Backup.Enabled
 		case "geoNat":
 			enabled = s.GeoNAT.Enabled
+		case "pppRadius":
+			enabled = s.PPPRadius.Enabled
 		case "security":
 			enabled = s.Security.Enabled
 		case "wgServer":
@@ -1070,6 +1077,10 @@ func buildScript(device *Info, s *Settings, now time.Time, avail map[string]bool
 	if s.PPTP.Enabled && avail["pptp"] {
 		anyOn = true
 		writeVPNClient(&b, s.PPTP, false)
+	}
+	if s.PPPRadius.Enabled && avail["pppRadius"] {
+		anyOn = true
+		writePPPRadius(&b, s.PPPRadius)
 	}
 	if s.GeoNAT.Enabled && avail["geoNat"] {
 		anyOn = true
