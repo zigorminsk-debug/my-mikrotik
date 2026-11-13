@@ -30,6 +30,8 @@ type Options struct {
 	Version string
 	// WebRoot — файлы интерфейса (обычно web.Content()).
 	WebRoot fs.FS
+	// DeviceStore is optional; nil disables the desktop device list.
+	DeviceStore *DeviceStore
 }
 
 // Both application paths replace the same mti-apply script. Refuse overlapping
@@ -71,6 +73,7 @@ func NewMux(opt Options) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusOK, apiResponse{OK: true, Version: ver})
 	})
+	mux.HandleFunc("/api/devices", handleDevices(opt.DeviceStore))
 	mux.HandleFunc("/api/discovery", handleDiscovery)
 	mux.HandleFunc("/api/info", handleInfo(ver))
 	mux.HandleFunc("/api/interfaces", handleInterfaces(ver))

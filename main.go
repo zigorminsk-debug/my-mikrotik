@@ -13,7 +13,9 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 
@@ -23,7 +25,7 @@ import (
 
 // version подставляется при релизной сборке через -ldflags "-X main.version=...".
 // Версия отображается в приложении и используется для CI-артефактов.
-var version = "0.2.16"
+var version = "0.2.17"
 
 func main() {
 	closeLog := initLogging()
@@ -40,7 +42,11 @@ func main() {
 
 	// instrument позволяет заметить окно браузера, которое открылось,
 	// но не показало страницу (см. openDesktop в desktop_windows.go).
-	h := instrument(server.NewMux(server.Options{Version: version, WebRoot: web.Content()}))
+	var deviceStore *server.DeviceStore
+	if configDir, err := os.UserConfigDir(); err == nil {
+		deviceStore = server.NewDeviceStore(filepath.Join(configDir, "MikroTik Inspector", "devices.json"))
+	}
+	h := instrument(server.NewMux(server.Options{Version: version, WebRoot: web.Content(), DeviceStore: deviceStore}))
 
 	log.Printf("MikroTik Inspector %s запущен", version)
 	var done <-chan error

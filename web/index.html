@@ -282,6 +282,27 @@
       </form>
     </section>
 
+    <section class="card" id="devices-card">
+      <h2>Сохранённые устройства</h2>
+      <div class="hint">Локальный список без паролей: название, адрес и заметка. Не записывайте секреты в эти поля: файл и экспорт не зашифрованы. Адрес может устареть и не подтверждает личность устройства. Выбор не подключается автоматически.</div>
+      <div class="grid">
+        <label class="field">Сохранённая запись<select id="devices-select" disabled><option value="">— выберите запись —</option></select></label>
+        <label class="field">Название<input id="devices-name" maxlength="80" disabled></label>
+        <label class="field">Адрес роутера или MAC<input id="devices-host" maxlength="255" disabled></label>
+        <label class="field">Заметка (без паролей)<input id="devices-note" maxlength="500" disabled></label>
+      </div>
+      <div class="row">
+        <button type="button" id="devices-add" disabled>Добавить</button>
+        <button type="button" class="ghost" id="devices-update" disabled>Сохранить изменения</button>
+        <button type="button" class="ghost" id="devices-delete" disabled>Удалить</button>
+        <button type="button" class="ghost" id="devices-use" disabled>Подставить адрес</button>
+        <button type="button" class="ghost" id="devices-refresh">Обновить список</button>
+      </div>
+      <div class="row"><button type="button" class="ghost" id="devices-export" disabled>Экспорт .json</button><label class="field">Импорт .json<input type="file" id="devices-file" accept=".json,application/json" disabled></label><button type="button" class="ghost" id="devices-import" disabled>Добавить из файла</button></div>
+      <div class="hint">Подставляется только адрес; пароль очищается. Логин, порт, протокол и TLS остаются в форме (для MAC протокол выбирается автоматически) — проверьте их перед подключением. Импорт добавляет записи и не заменяет имеющиеся; одинаковые названия отклоняются.</div>
+      <div class="hint" id="devices-status" aria-live="polite">Загрузка списка…</div>
+    </section>
+
     <div id="status" class="error-box"></div>
 
     <section class="card" id="snapshot-compare-card">
@@ -854,9 +875,9 @@
 
   function connectionKey() { return JSON.stringify(connPayload()); }
 
-  function invalidateConnection() {
+  function invalidateConnection(force) {
     if (!lastInfo && connectedKey === null) return;
-    if (connectedKey !== null && connectedKey === connectionKey()) return;
+    if (force !== true && connectedKey !== null && connectedKey === connectionKey()) return;
     connectedKey = null;
     clearNetworkSnapshot();
     $("build-ok").style.display = "none"; $("build-ok").textContent = "";
@@ -2162,6 +2183,95 @@
         btn.textContent = "Применить на роутере";
       });
   });
+
+  // Desktop device list: persistent in the application data folder, not localStorage.
+  var deviceEntries = [], deviceRevision = null, deviceBusy = false, deviceSelected = -1;
+  function deviceStatus(msg) { $("devices-status").textContent = msg; }
+  function deviceControls() {
+    var ready = !!deviceRevision && !deviceBusy, selected = ready && deviceSelected >= 0 && deviceSelected < deviceEntries.length;
+    ["devices-select", "devices-name", "devices-host", "devices-note", "devices-add", "devices-file"].forEach(function (id) { $(id).disabled = !ready; });
+    ["devices-update", "devices-delete", "devices-use"].forEach(function (id) { $(id).disabled = !selected; });
+    $("devices-export").disabled = !ready; $("devices-import").disabled = !ready || !$("devices-file").files.length;
+    $("devices-refresh").disabled = deviceBusy;
+  }
+  function renderDeviceEntries() {
+    var select = $("devices-select"); select.textContent = "";
+    var empty = document.createElement("option"); empty.value = ""; empty.textContent = "— выберите запись —"; select.appendChild(empty);
+    deviceEntries.forEach(function (entry, index) {
+      var option = document.createElement("option"); option.value = String(index); option.textContent = entry.name + " — " + entry.host; select.appendChild(option);
+    });
+    select.value = deviceSelected >= 0 ? String(deviceSelected) : ""; deviceControls();
+  }
+  function deviceResponse(response) {
+    return response.json().then(function (data) {
+      if (!response.ok || !data.ok) { var error = new Error(data.error || "Ошибка локального списка"); error.status = response.status; throw error; }
+      if (!Array.isArray(data.devices) || typeof data.revision !== "string") throw new Error("Некорректный ответ локального хранилища");
+      return data;
+    });
+  }
+  function refreshDeviceEntries() {
+    if (deviceBusy) return; deviceBusy = true; deviceControls(); deviceStatus("Загрузка списка…");
+    fetch("/api/devices", {cache:"no-store"}).then(deviceResponse).then(function (data) {
+      deviceEntries = data.devices; deviceRevision = data.revision; deviceSelected = -1; renderDeviceEntries(); deviceStatus("Записей: " + deviceEntries.length + ". Проверьте актуальность адресов.");
+    }).catch(function (e) { deviceRevision = null; deviceStatus(e.message || "Не удалось загрузить список."); })
+      .finally(function () { deviceBusy = false; deviceControls(); });
+  }
+  function saveDeviceEntries(next, message) {
+    if (deviceBusy || !deviceRevision) return; deviceBusy = true; deviceControls(); deviceStatus("Сохранение…");
+    fetch("/api/devices", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({revision:deviceRevision, devices:next})})
+      .then(deviceResponse).then(function (data) {
+        deviceEntries = data.devices; deviceRevision = data.revision; deviceSelected = -1; renderDeviceEntries(); deviceStatus(message);
+      }).catch(function (e) {
+        if (e.status !== 400) { deviceRevision = null; deviceStatus((e.message || "Ошибка связи") + " Состояние сохранения неизвестно: обновите список."); }
+        else deviceStatus(e.message);
+      }).finally(function () { deviceBusy = false; deviceControls(); });
+  }
+  function editorDevice() { return {name:$("devices-name").value.trim(), host:$("devices-host").value.trim(), note:$("devices-note").value.trim()}; }
+  $("devices-select").addEventListener("change", function () {
+    deviceSelected = this.value === "" ? -1 : Number(this.value);
+    var e = deviceEntries[deviceSelected]; if (e) { $("devices-name").value = e.name; $("devices-host").value = e.host; $("devices-note").value = e.note; }
+    deviceControls();
+  });
+  $("devices-add").addEventListener("click", function () { saveDeviceEntries(deviceEntries.concat([editorDevice()]), "Запись добавлена."); });
+  $("devices-update").addEventListener("click", function () {
+    if (deviceSelected < 0) return; var next = deviceEntries.slice(); next[deviceSelected] = editorDevice(); saveDeviceEntries(next, "Изменения сохранены.");
+  });
+  $("devices-delete").addEventListener("click", function () {
+    if (deviceSelected < 0 || !confirm("Удалить выбранную запись из локального списка?")) return;
+    var next = deviceEntries.slice(); next.splice(deviceSelected, 1); saveDeviceEntries(next, "Запись удалена.");
+  });
+  $("devices-use").addEventListener("click", function () {
+    if (deviceSelected < 0 || !deviceEntries[deviceSelected]) return;
+    if ($("go").disabled || applyInProgress) { deviceStatus("Дождитесь окончания текущего подключения или применения."); return; }
+    $("host").value = deviceEntries[deviceSelected].host; $("password").value = ""; syncProtocolFromHost(); invalidateConnection(true);
+    deviceStatus("Адрес подставлен; пароль очищен. Проверьте адрес и остальные параметры, затем подключитесь вручную.");
+  });
+  $("devices-refresh").addEventListener("click", refreshDeviceEntries);
+  $("devices-file").addEventListener("change", deviceControls);
+  $("devices-export").addEventListener("click", function () {
+    if (!deviceRevision || deviceBusy) return;
+    var a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify({schema:1, devices:deviceEntries}, null, 2)], {type:"application/json;charset=utf-8"}));
+    a.download = "mikrotik-devices.json"; document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 0);
+    deviceStatus("Файл содержит адреса и заметки. Храните и передавайте его осторожно.");
+  });
+  $("devices-import").addEventListener("click", function () {
+    var file = $("devices-file").files[0]; if (!file || deviceBusy || !deviceRevision) return;
+    if (file.size > 512 * 1024) { deviceStatus("Файл слишком большой (максимум 512 КиБ)."); return; }
+    deviceBusy = true; deviceControls(); deviceStatus("Чтение файла…");
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var data = JSON.parse(String(reader.result || ""));
+        if (!data || data.schema !== 1 || !Array.isArray(data.devices) || Object.keys(data).some(function (k) { return k !== "schema" && k !== "devices"; }) ||
+            data.devices.some(function (e) { return !e || typeof e !== "object" || Array.isArray(e) || Object.keys(e).sort().join(",") !== "host,name,note" || typeof e.name !== "string" || typeof e.host !== "string" || typeof e.note !== "string"; })) throw new Error("Неизвестный формат или лишние поля; файл не импортирован.");
+        deviceBusy = false; saveDeviceEntries(deviceEntries.concat(data.devices), "Импорт завершён; добавлено записей: " + data.devices.length + ".");
+      } catch (e) { deviceBusy = false; deviceControls(); deviceStatus(e.message || "Некорректный файл."); }
+    };
+    reader.onerror = reader.onabort = function () { deviceBusy = false; deviceControls(); deviceStatus("Не удалось прочитать файл."); };
+    try { reader.readAsText(file, "UTF-8"); } catch (e) { deviceBusy = false; deviceControls(); deviceStatus("Не удалось прочитать файл."); }
+  });
+  refreshDeviceEntries();
 
   loadPrefs();
   showTab("info");

@@ -23,7 +23,7 @@ function setup() {
   });
   vm.runInContext(between('  function geoApplyIssue()', '  // ------------------------------------------------------------------\n  // предпросмотр'),ctx);
   vm.runInContext(between('  function schedulePreview()', '  function preview()'),ctx);
-  vm.runInContext(between('  $("btn-apply").addEventListener("click"', '  loadPrefs();'),ctx);
+  vm.runInContext(between('  $("btn-apply").addEventListener("click"', '  // Desktop device list:'),ctx);
   return {ctx,el,resolve:res=>resolveFetch(res), selectGeo:()=>{geo=true}, selectRadius:()=>{radiusOn=true}, requests:()=>requests, request:()=>lastRequest, state:()=>state};
 }
 const settle=()=>new Promise(r=>setImmediate(r));

@@ -51,7 +51,7 @@ Object.assign(ctx, {
   clearNetworkSnapshot() {},
   $: id => els[id], setActions(enabled) { ctx.actions = enabled; }, showError(msg) { ctx.error = msg; },
 });
-vm.runInContext(between('  function invalidateConnection()', '  ["host", "port", "user"'), ctx);
+vm.runInContext(between('  function invalidateConnection(force)', '  ["host", "port", "user"'), ctx);
 ctx.invalidateConnection();
 assert.equal(ctx.lastInfo, null);
 assert.equal(ctx.connectedKey, null);
@@ -59,6 +59,10 @@ assert.equal(ctx.interfacesReady, false);
 assert.equal(ctx.currentScript, '');
 assert.equal(ctx.actions, false);
 assert.match(ctx.error, /Подключитесь заново/);
+// Explicit selection of a saved entry must invalidate even if connection fields match.
+ctx.lastInfo = {model:'old'}; ctx.connectedKey = 'new'; ctx.interfacesReady = true; ctx.currentScript = 'old script';
+ctx.invalidateConnection(); assert.notEqual(ctx.lastInfo, null);
+ctx.invalidateConnection(true); assert.equal(ctx.lastInfo, null); assert.equal(ctx.currentScript, ''); assert.equal(ctx.actions, false);
 console.log('UI guards: OK');
 
 // Experimental USB scripts can be inspected/copied but not applied by the UI.
