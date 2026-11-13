@@ -1629,6 +1629,21 @@
     var lines = ["MikroTik Inspector — снимок каналов и маршрутов", version,
       "Протокол: " + protoLabel(snapshot.protocol), "Начало (UTC): " + (snapshot.startedAt || "—"), "Конец (UTC): " + (snapshot.finishedAt || "—"),
       "Данные не атомарны и не подтверждают доступ в интернет. Отсутствующее поле — неизвестно."];
+    // Only flag positively identified active IPv4 main defaults with distinct
+    // gateways and equal distances. ECMP may be intentional, so don't diagnose
+    // an outage or claim that the conflict list is exhaustive.
+    var routeSection = (snapshot.sections || {}).routes || {};
+    var activeRoutes = routeSection.status === "ok" ? (routeSection.rows || []).filter(function (r) {
+      return r["dst-address"] === "0.0.0.0/0" && r["routing-table"] === "main" &&
+        (r.active === "true" || r.active === "yes") && r.disabled !== "true" && r.disabled !== "yes" &&
+        /^[0-9]+$/.test(r.distance || "") && !!(r["immediate-gw"] || r.gateway);
+    }) : [];
+    var equalActive = activeRoutes.some(function (a, i) {
+      return activeRoutes.slice(i + 1).some(function (b) {
+        return Number(a.distance) === Number(b.distance) && (a["immediate-gw"] || a.gateway) !== (b["immediate-gw"] || b.gateway);
+      });
+    });
+    if (equalActive) lines.push("", "ВНИМАНИЕ: в main обнаружены активные маршруты по умолчанию с одинаковой distance и разными шлюзами. Если ожидается только резервирование, каналы могут конкурировать; проверьте таблицу маршрутов. Это может быть и намеренная балансировка.");
     sections.forEach(function (spec) {
       var section = (snapshot.sections || {})[spec[0]] || {}, rows = section.rows || [];
       lines.push("", spec[1] + ":");
