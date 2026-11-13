@@ -290,6 +290,14 @@
       </div>
 
       <div class="card">
+        <h2>Снимок каналов и маршрутов</h2>
+        <div class="hint">Ручной сбор по API или REST: интерфейсы, IPv4-адреса, DHCP-клиенты, маршруты по умолчанию и доступные служебные записи failover. Настройки не изменяются. Данные читаются последовательно и могут измениться во время сбора; доступность интернета не проверяется. Через MAC-Telnet эта диагностика пока недоступна.</div>
+        <div class="row"><button type="button" class="ghost" id="snapshot-run">Собрать снимок</button><button type="button" class="ghost" id="snapshot-copy" disabled>Скопировать</button><button type="button" class="ghost" id="snapshot-download" disabled>Скачать .txt</button></div>
+        <div class="hint">Отчёт содержит IP-адреса, шлюзы, имена интерфейсов и комментарии маршрутов. Проверьте и при необходимости удалите частные сведения перед отправкой.</div>
+        <pre id="snapshot-output" class="mono" aria-live="polite" style="white-space:pre-wrap;word-break:break-word;max-height:32rem;overflow:auto"></pre>
+      </div>
+
+      <div class="card">
         <h2>Диагностика определения модели</h2>
         <div class="hint">Только чтение: значения получены при последнем подключении, без дополнительных команд изменения настроек. Сверьте их с маркировкой на корпусе. Названия модели и платы могут различаться — это не обязательно ошибка. Для обновления нажмите «Подключиться» ещё раз.</div>
         <div class="warn-box">При несоответствии модели не применяйте настройки, пока не проверите адрес подключения и вывод RouterOS. Эти данные сами по себе не подтверждают физическую идентичность устройства.</div>
@@ -677,6 +685,8 @@
   var connectedKey = null;  // bound to all connection fields, including the password; never persisted
   var interfacesReady = false;
   var interfaceSeq = 0;
+  var snapshotSeq = 0;
+  var snapshotText = "";
 
   var LABELS = [
     ["identity", "Идентификатор"],
@@ -811,6 +821,7 @@
     if (!lastInfo && connectedKey === null) return;
     if (connectedKey !== null && connectedKey === connectionKey()) return;
     connectedKey = null;
+    clearNetworkSnapshot();
     interfacesReady = false;
     lastInfo = null;
     lastIfaces = [];
@@ -1506,6 +1517,7 @@
     var btn = $("go");
     if (btn.disabled) return;
     // Старый скрипт не должен применяться к другому устройству после неудачного входа.
+    clearNetworkSnapshot();
     lastInfo = null;
     connectedKey = null;
     interfacesReady = false;
@@ -1594,6 +1606,78 @@
     $("result").classList.add("show");
     $("copy").style.display = "";
   }
+
+  function clearNetworkSnapshot() {
+    snapshotSeq++;
+    snapshotText = "";
+    $("snapshot-output").textContent = "";
+    $("snapshot-run").disabled = false;
+    $("snapshot-run").textContent = "Собрать снимок";
+    $("snapshot-copy").disabled = true;
+    $("snapshot-download").disabled = true;
+  }
+
+  function formatNetworkSnapshot(snapshot, version) {
+    var sections = [
+      ["interfaces", "Интерфейсы", ["name", "type", "running", "disabled"]],
+      ["addresses", "IPv4-адреса", ["address", "network", "interface", "actual-interface", "dynamic", "disabled", "invalid"]],
+      ["dhcp", "DHCP-клиенты", ["interface", "status", "address", "gateway", "add-default-route", "default-route-distance", "disabled", "dynamic"]],
+      ["routes", "Маршруты по умолчанию и mti-probe-link", ["dst-address", "gateway", "immediate-gw", "routing-table", "routing-mark", "distance", "active", "dynamic", "disabled", "unreachable", "blackhole", "comment"]],
+      ["scheduler", "Планировщик mti-failover", ["name", "disabled", "interval", "run-count", "next-run"]],
+      ["environment", "Доступные переменные mti-failover", ["name", "value"]]
+    ];
+    var lines = ["MikroTik Inspector — снимок каналов и маршрутов", version,
+      "Протокол: " + protoLabel(snapshot.protocol), "Начало (UTC): " + (snapshot.startedAt || "—"), "Конец (UTC): " + (snapshot.finishedAt || "—"),
+      "Данные не атомарны и не подтверждают доступ в интернет. Отсутствующее поле — неизвестно."];
+    sections.forEach(function (spec) {
+      var section = (snapshot.sections || {})[spec[0]] || {}, rows = section.rows || [];
+      lines.push("", spec[1] + ":");
+      if (section.status === "error") { lines.push("  Не удалось прочитать (права, версия RouterOS или ошибка связи)."); return; }
+      if (section.status !== "ok") { lines.push("  Не прочитано: сбор прерван или данные недоступны."); return; }
+      if (!rows.length) lines.push("  Записей не найдено.");
+      rows.forEach(function (row, i) {
+        lines.push("  " + (i + 1) + ". " + spec[2].map(function (k) { return k + "=" + (row[k] === undefined || row[k] === "" ? "—" : row[k]); }).join("; "));
+      });
+      if (section.truncated) lines.push("  Показаны не все записи (лимит 500).");
+    });
+    lines.push("", "Переменные скрипта могут отсутствовать или быть устаревшими; наличие записи не доказывает работу контроллера. Маршрутизация зависит и от других правил/таблиц.");
+    return lines.join("\n");
+  }
+
+  $("snapshot-run").addEventListener("click", function () {
+    if (!lastInfo || connectedKey !== connectionKey()) return;
+    clearNetworkSnapshot();
+    var seq = snapshotSeq, device = lastInfo, key = connectedKey, conn = connPayload(), btn = this;
+    conn.protocol = device.protocol;
+    btn.disabled = true; btn.textContent = "Собираем…";
+    $("snapshot-output").textContent = "Чтение данных…";
+    function current() { return seq === snapshotSeq && lastInfo === device && connectedKey === key && connectionKey() === key; }
+    fetch("/api/network-snapshot", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({conn:conn, device:device})})
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (data) {
+        if (!current()) return;
+        if (!data.ok || !data.snapshot) throw new Error(data.error || "не удалось собрать снимок");
+        snapshotText = formatNetworkSnapshot(data.snapshot, $("appver").textContent);
+        $("snapshot-output").textContent = snapshotText;
+        $("snapshot-copy").disabled = false; $("snapshot-download").disabled = false;
+      })
+      .catch(function (e) { if (current()) $("snapshot-output").textContent = "Ошибка: " + (e.message || "не удалось собрать снимок"); })
+      .finally(function () { if (current()) { btn.disabled = false; btn.textContent = "Собрать снимок"; } });
+  });
+  $("snapshot-copy").addEventListener("click", function () {
+    if (!snapshotText || !lastInfo || connectedKey !== connectionKey()) return;
+    var btn = this;
+    copyText(snapshotText).then(function () { flash(btn, "Скопировано ✓"); }).catch(function () { showError("Не удалось скопировать снимок"); });
+  });
+  $("snapshot-download").addEventListener("click", function () {
+    if (!snapshotText || !lastInfo || connectedKey !== connectionKey()) return;
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([snapshotText], {type:"text/plain;charset=utf-8"}));
+    a.download = "mikrotik-network-snapshot.txt";
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 0);
+    flash(this, "Файл сохранён ✓");
+  });
 
   // Only explicitly selected fields are exported; never serialize Params or Info wholesale.
   function identityDiagnostic(info, version, time) {

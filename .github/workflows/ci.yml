@@ -36,7 +36,9 @@ jobs:
           fi
 
       - name: Проверка защит интерфейса
-        run: node web/ui.test.cjs
+        run: |
+          node web/ui.test.cjs
+          node web/snapshot.test.cjs
 
       - name: go vet
         run: go vet ./...

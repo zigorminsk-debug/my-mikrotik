@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"image/png"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -342,5 +344,67 @@ func TestVersionAvailableWithoutRouter(t *testing.T) {
 	defer post.Body.Close()
 	if post.StatusCode != http.StatusMethodNotAllowed {
 		t.Fatalf("POST status %d", post.StatusCode)
+	}
+}
+
+func TestNetworkSnapshotEndpointValidation(t *testing.T) {
+	srv := newTestServer(t)
+	resp, err := http.Post(srv.URL+"/api/network-snapshot", "application/json", strings.NewReader(`{"conn":{"host":"127.0.0.1","user":"admin","protocol":"rest"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || body.OK || !strings.Contains(body.Error, "подключитесь") {
+		t.Fatalf("status=%d body=%+v", resp.StatusCode, body)
+	}
+}
+
+func TestNetworkSnapshotOverHTTP(t *testing.T) {
+	router := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("unexpected method %s", r.Method)
+		}
+		switch r.URL.Path {
+		case "/rest/system/identity":
+			io.WriteString(w, `[{"name":"router"}]`)
+		case "/rest/system/resource":
+			io.WriteString(w, `[{"board-name":"hAP","version":"7.15","architecture-name":"arm"}]`)
+		case "/rest/interface":
+			io.WriteString(w, `[{"name":"ether1","running":"true"}]`)
+		default:
+			io.WriteString(w, `[]`)
+		}
+	}))
+	defer router.Close()
+	hostport := strings.TrimPrefix(router.URL, "http://")
+	host, portStr, err := net.SplitHostPort(hostport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := map[string]any{"conn": map[string]any{"host": host, "restPort": port, "user": "admin", "password": "topsecret", "protocol": "rest"}, "device": map[string]any{"protocol": "rest", "identity": "router", "routeros": "7.15", "architecture": "arm", "diagnostics": map[string]any{"resourceBoard": "hAP"}}}
+	b, _ := json.Marshal(req)
+	srv := newTestServer(t)
+	resp, err := http.Post(srv.URL+"/api/network-snapshot", "application/json", bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != 200 || !strings.Contains(string(raw), `"name":"ether1"`) || strings.Contains(string(raw), "topsecret") {
+		t.Fatalf("response: %d %s", resp.StatusCode, raw)
 	}
 }

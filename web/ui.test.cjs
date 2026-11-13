@@ -35,12 +35,20 @@ assert.doesNotMatch(diagnostic, /PRIVATE-IDENTITY|SECRET|SERIAL/);
 assert.match(ctx.identityDiagnostic({model:'CHR',diagnostics:{routerboardStatus:'error'}}, 'v', 't'), /не удалось прочитать/);
 assert.match(ctx.identityDiagnostic({model:'RB',diagnostics:{routerboardModel:'RB',routerboardStatus:'ok'}}, 'v', 't'), /model \(резерв\)/);
 
+vm.runInContext(between('  function formatNetworkSnapshot(snapshot, version)', '  $("snapshot-run").addEventListener'), ctx);
+const snapshot = ctx.formatNetworkSnapshot({protocol:'api',startedAt:'start',finishedAt:'end',sections:{interfaces:{status:'ok',rows:[{name:'ether1', running:'true'}]},addresses:{status:'error',rows:[]},dhcp:{status:'skipped',rows:[]},routes:{status:'ok',rows:[]}}}, 'v');
+assert.match(snapshot, /name=ether1; type=—; running=true/);
+assert.match(snapshot, /Не удалось прочитать/);
+assert.match(snapshot, /Не прочитано/);
+assert.match(snapshot, /Записей не найдено/);
+
 const els = Object.fromEntries(['build-body', 'build-need-conn', 'result', 'copy'].map(id =>
   [id, {style: {}, classList: {remove() {}}}]));
 Object.assign(ctx, {
   lastInfo: {model: 'old'}, connectedKey: 'old', interfacesReady: true,
   lastIfaces: [{name:'ether1'}], currentScript: 'old script', previewTimer: null,
   previewSeq: 0, connectionKey: () => 'new', clearTimeout() {},
+  clearNetworkSnapshot() {},
   $: id => els[id], setActions(enabled) { ctx.actions = enabled; }, showError(msg) { ctx.error = msg; },
 });
 vm.runInContext(between('  function invalidateConnection()', '  ["host", "port", "user"'), ctx);

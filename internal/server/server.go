@@ -69,6 +69,7 @@ func NewMux(opt Options) http.Handler {
 	mux.HandleFunc("/api/discovery", handleDiscovery)
 	mux.HandleFunc("/api/info", handleInfo(ver))
 	mux.HandleFunc("/api/interfaces", handleInterfaces(ver))
+	mux.HandleFunc("/api/network-snapshot", handleNetworkSnapshot(ver))
 	mux.HandleFunc("/api/config", handleConfig)
 	mux.HandleFunc("/api/geo/countries", handleGeoCountries)
 	mux.HandleFunc("/api/geo/prefixes", handleGeoPrefixes)
@@ -194,6 +195,35 @@ func handleInterfaces(ver string) http.HandlerFunc {
 			Features   []mikrotik.FeatureInfo `json:"features"`
 			Version    string                 `json:"version,omitempty"`
 		}{OK: true, Interfaces: list, Features: mikrotik.AnalyzeFeatures(req.Device, list), Version: ver})
+	}
+}
+
+func handleNetworkSnapshot(ver string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Conn   mikrotik.Params `json:"conn"`
+			Device *mikrotik.Info  `json:"device"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, apiResponse{OK: false, Error: "некорректный запрос"})
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		defer cancel()
+		snapshot, err := mikrotik.CollectNetworkSnapshot(ctx, req.Conn, req.Device)
+		if err != nil {
+			writeJSON(w, http.StatusOK, apiResponse{OK: false, Error: err.Error(), Version: ver})
+			return
+		}
+		writeJSON(w, http.StatusOK, struct {
+			OK       bool                      `json:"ok"`
+			Snapshot *mikrotik.NetworkSnapshot `json:"snapshot"`
+			Version  string                    `json:"version,omitempty"`
+		}{true, snapshot, ver})
 	}
 }
 
