@@ -72,6 +72,9 @@ func (c *apiClient) exec(words ...string) (records []map[string]string, done map
 
 	records = []map[string]string{}
 	var trapMsg string
+	var responseBytes, sentenceCount int
+	const maxResponseBytes = 64 << 20
+	const maxResponseSentences = 50000
 	for {
 		s, err := readSentence(c.conn)
 		if err != nil {
@@ -79,6 +82,13 @@ func (c *apiClient) exec(words ...string) (records []map[string]string, done map
 				return nil, nil, fmt.Errorf("%s", trapMsg)
 			}
 			return nil, nil, fmt.Errorf("ошибка чтения ответа: %w", err)
+		}
+		sentenceCount++
+		for _, word := range s {
+			responseBytes += len(word)
+		}
+		if sentenceCount > maxResponseSentences || responseBytes > maxResponseBytes {
+			return nil, nil, fmt.Errorf("ответ RouterOS API превышает допустимый размер")
 		}
 		if len(s) == 0 {
 			continue // пустое предложение игнорируем

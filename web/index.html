@@ -883,60 +883,31 @@
   // ------------------------------------------------------------------
   // автоматическое приведение IP-адресов к формату
   // ------------------------------------------------------------------
-  function fmtOctets(str) {
-    var parts = String(str).split(".");
-    if (parts.length > 4) parts = parts.slice(0, 4);
-    parts = parts.map(function (p) {
-      var digits = p.replace(/[^0-9]/g, "");
-      if (digits === "") return "";
-      var n = parseInt(digits, 10);
-      if (isNaN(n)) return "";
-      if (n > 255) n = 255;
-      return String(n);
-    });
-    return parts.join(".");
-  }
-
-  function fmtMask(str) {
-    var digits = String(str).replace(/[^0-9]/g, "");
-    if (digits === "") return "";
-    var n = parseInt(digits, 10);
-    if (isNaN(n)) return "";
-    if (n > 32) n = 32;
-    return String(n);
-  }
-
-  // "192.168.001.010/024" → "192.168.1.10/24"
   function fmtAddr(str) {
-    var s = String(str).replace(/\s+/g, "");
-    var slash = s.indexOf("/");
-    if (slash < 0) return fmtOctets(s);
-    var ip = fmtOctets(s.slice(0, slash));
-    var mask = fmtMask(s.slice(slash + 1));
-    return mask === "" ? ip : ip + "/" + mask;
+    var s = String(str).trim(), parts = s.split("/");
+    if (parts.length > 2) return s;
+    var octets = parts[0].split(".");
+    for (var i = 0; i < octets.length; i++) {
+      if (!octets[i]) continue;
+      if (!/^\d+$/.test(octets[i]) || Number(octets[i]) > 255) return s;
+      octets[i] = String(Number(octets[i]));
+    }
+    if (parts.length === 2) {
+      if (!/^\d+$/.test(parts[1]) || Number(parts[1]) > 32) return s;
+      return octets.join(".") + "/" + String(Number(parts[1]));
+    }
+    return octets.join(".");
   }
 
   function fmtAddrList(str) {
-    return String(str).split(",").map(function (x) {
-      return fmtAddr(x.trim());
-    }).filter(function (x) { return x !== ""; }).join(", ");
+    return String(str).split(",").map(function (x) { return fmtAddr(x); }).join(",");
   }
 
   function normalizeField(el) {
     if (!el.value) return;
     if (el.classList.contains("iplist")) el.value = fmtAddrList(el.value);
     else if (el.classList.contains("ip") || el.classList.contains("cidr")) el.value = fmtAddr(el.value);
-    if (el.classList.contains("ip") || el.classList.contains("iplist")) {
-      el.value = el.value.replace(/, +/g, ",");
-    }
   }
-
-  document.addEventListener("input", function (ev) {
-    var el = ev.target;
-    if (!el.classList || !(el.classList.contains("ip") || el.classList.contains("cidr") || el.classList.contains("iplist"))) return;
-    var cleaned = el.value.replace(/[^0-9.,/ ]/g, "");
-    if (cleaned !== el.value) el.value = cleaned;
-  }, true);
 
   document.addEventListener("blur", function (ev) {
     var el = ev.target;
@@ -1375,7 +1346,7 @@
   // ------------------------------------------------------------------
   $("discover").addEventListener("click", function () {
     var btn = this, box = $("discovery-result"); btn.disabled = true; box.textContent = "Поиск…";
-    fetch("/api/discovery", {method:"POST"}).then(function(r){return r.json();}).then(function(data){
+    fetch("/api/discovery", {method:"POST", headers:{"Content-Type":"application/json"}, body:"{}"}).then(function(r){return r.json();}).then(function(data){
       box.textContent = "";
       if (!data.ok) { box.textContent = data.error; return; }
       if (!data.neighbors.length) { box.textContent = "Устройства не найдены. Проверьте доступ к L2, MNDP и UDP 5678."; return; }

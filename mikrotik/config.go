@@ -373,12 +373,15 @@ func deriveLAN(cidr string) (network, gateway, pool string, err error) {
 	if v4 == nil {
 		return "", "", "", fmt.Errorf("ожидается IPv4-адрес, получено %q", cidr)
 	}
-	_, bits := ipnet.Mask.Size()
+	ones, bits := ipnet.Mask.Size()
 	if bits != 32 {
 		return "", "", "", fmt.Errorf("ожидается IPv4-маска, получено %q", cidr)
 	}
 	network = ipnet.String()
 	gateway = v4.String()
+	if ones >= 31 {
+		return network, gateway, "", nil
+	}
 
 	// broadcast = network | ^mask
 	bcast := make(net.IP, 4)
@@ -498,54 +501,47 @@ func attr(k, v string) string {
 // Приведение IP-адресов к формату
 // ---------------------------------------------------------------------------
 
-// normOctets приводит группу октетов к каноническому виду:
-// "192.168.088.001" → "192.168.1.10"? нет: 192.168.88.1; лишние октеты
-// отбрасываются, значения больше 255 ограничиваются 255.
-func normOctets(s string) string {
-	parts := strings.Split(s, ".")
-	if len(parts) > 4 {
-		parts = parts[:4]
-	}
-	for i, p := range parts {
-		digits := strings.Map(func(r rune) rune {
-			if r >= '0' && r <= '9' {
-				return r
-			}
-			return -1
-		}, p)
-		if digits == "" {
-			parts[i] = ""
-			continue
-		}
-		n, err := strconv.Atoi(digits)
-		if err != nil || n > 255 {
-			n = 255
-		}
-		parts[i] = strconv.Itoa(n)
-	}
-	return strings.Join(parts, ".")
-}
-
-// NormalizeAddr приводит адрес (с маской или без) к формату IP-адреса.
+// NormalizeAddr removes leading zeroes only from syntactically numeric IPv4
+// components. Invalid values remain invalid rather than changing the target.
 func NormalizeAddr(s string) string {
 	s = strings.TrimSpace(s)
-	if s == "" {
-		return ""
+	parts := strings.Split(s, "/")
+	if len(parts) > 2 {
+		return s
 	}
-	slash := strings.Index(s, "/")
-	if slash < 0 {
-		return normOctets(s)
+	octets := strings.Split(parts[0], ".")
+	for i, p := range octets {
+		if p == "" {
+			continue
+		}
+		for _, c := range p {
+			if c < '0' || c > '9' {
+				return s
+			}
+		}
+		n, err := strconv.Atoi(p)
+		if err != nil || n > 255 {
+			return s
+		}
+		octets[i] = strconv.Itoa(n)
 	}
-	ip := normOctets(s[:slash])
-	mask := strings.TrimFunc(s[slash+1:], func(r rune) bool { return r < '0' || r > '9' })
-	if mask == "" {
-		return ip
+	addr := strings.Join(octets, ".")
+	if len(parts) == 2 {
+		if parts[1] == "" {
+			return s
+		}
+		for _, c := range parts[1] {
+			if c < '0' || c > '9' {
+				return s
+			}
+		}
+		n, err := strconv.Atoi(parts[1])
+		if err != nil || n > 32 {
+			return s
+		}
+		addr += "/" + strconv.Itoa(n)
 	}
-	n, err := strconv.Atoi(mask)
-	if err != nil || n > 32 {
-		n = 32
-	}
-	return ip + "/" + strconv.Itoa(n)
+	return addr
 }
 
 // NormalizeAddrList приводит список адресов через запятую к формату.
@@ -558,7 +554,7 @@ func NormalizeAddrList(s string) string {
 }
 
 // normalizeIPFields правит «сырые» значения из интерфейса: ведущие нули,
-// лишние октеты, маску больше /32 — до валидации и генерации скрипта.
+// до валидации, не исправляя некорректные адреса на другие.
 func normalizeIPFields(s *Settings) {
 	s.LAN.Address = NormalizeAddr(s.LAN.Address)
 	s.DHCP.PoolStart = NormalizeAddr(s.DHCP.PoolStart)
@@ -688,6 +684,19 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 		}
 		// Проверки пула — только когда LAN-адрес успешно разобран.
 		if lanNetwork != "" {
+			ip, subnet, _ := net.ParseCIDR(s.LAN.Address)
+			ones, _ := subnet.Mask.Size()
+			if ones >= 31 {
+				errs = append(errs, "DHCP: подсеть слишком мала для сервера и клиентов")
+			} else {
+				broadcast := make(net.IP, 4)
+				for i := range broadcast {
+					broadcast[i] = subnet.IP.To4()[i] | ^subnet.Mask[i]
+				}
+				if ip.Equal(subnet.IP) || ip.Equal(broadcast) {
+					errs = append(errs, "DHCP: адрес роутера не может быть адресом сети или broadcast")
+				}
+			}
 			if lanErr == nil && lanPool == "" && strings.TrimSpace(s.DHCP.PoolStart) == "" {
 				errs = append(errs, "DHCP: подсеть "+lanNetwork+" слишком мала для пула")
 			}
@@ -701,6 +710,17 @@ func Generate(device *Info, ifaces []Iface, s *Settings, now time.Time) *ConfigR
 					errs = append(errs, "DHCP: диапазон пула должен лежать внутри подсети "+lanNetwork)
 				} else if cmpIPv4(start, end) > 0 {
 					errs = append(errs, "DHCP: начало пула больше его конца")
+				} else if ones < 31 {
+					broadcast := make(net.IP, 4)
+					for i := range broadcast {
+						broadcast[i] = subnet.IP.To4()[i] | ^subnet.Mask[i]
+					}
+					if net.ParseIP(start).Equal(subnet.IP) || net.ParseIP(end).Equal(broadcast) {
+						errs = append(errs, "DHCP: пул не должен включать адрес сети или broadcast")
+					}
+					if cmpIPv4(start, ip.String()) <= 0 && cmpIPv4(ip.String(), end) <= 0 {
+						errs = append(errs, "DHCP: пул не должен включать адрес роутера")
+					}
 				}
 			}
 		}

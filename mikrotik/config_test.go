@@ -739,12 +739,12 @@ func TestNormalizeAddr(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"192.168.088.001/24", "192.168.88.1/24"},
 		{" 192.168.001.010 ", "192.168.1.10"},
-		{"10.0.0.300/40", "10.0.0.255/32"},
+		{"10.0.0.300/40", "10.0.0.300/40"},
 		{"192.168.1", "192.168.1"},
-		{"1.2.3.4.5", "1.2.3.4"},
+		{"1.2.3.4.5", "1.2.3.4.5"},
 		{"192.168..1", "192.168..1"},
 		{"", ""},
-		{"abc192.168.1.1", "192.168.1.1"},
+		{"abc192.168.1.1", "abc192.168.1.1"},
 	}
 	for _, c := range cases {
 		if got := NormalizeAddr(c.in); got != c.want {
@@ -840,5 +840,27 @@ func TestDHCPNetworkAndNTPRouterOS7Paths(t *testing.T) {
 		if !strings.Contains(res.Script, want) {
 			t.Errorf("нет строки %s", want)
 		}
+	}
+}
+
+func TestDHCPRejectsUnsafeAddresses(t *testing.T) {
+	for _, tc := range []struct{ address, start, end string }{
+		{"192.168.88.1/24", "192.168.88.1", "192.168.88.10"},
+		{"192.168.88.1/24", "192.168.88.0", "192.168.88.10"},
+		{"192.168.88.1/24", "192.168.88.2", "192.168.88.255"},
+		{"192.168.88.0/24", "", ""},
+		{"192.168.88.255/24", "", ""},
+		{"255.255.255.255/32", "255.255.255.255", "255.255.255.255"},
+		{"10.0.0.1/31", "10.0.0.0", "10.0.0.1"},
+		{"192.168.88.300/24", "", ""},
+		{"192.168.88.1/40", "", ""},
+	} {
+		t.Run(tc.address+"-"+tc.start, func(t *testing.T) {
+			s := Settings{LAN: LanSettings{Enabled: true, Interface: "ether2", Address: tc.address}, DHCP: DHCPSettings{Enabled: true, Interface: "ether2", LeaseTime: "1d", PoolStart: tc.start, PoolEnd: tc.end}}
+			r := Generate(deviceWith("system", "dhcp"), []Iface{{Name: "ether2", Type: "ethernet"}}, &s, testTime())
+			if r.OK || r.Script != "" {
+				t.Fatalf("unsafe config accepted: %+v", r)
+			}
+		})
 	}
 }

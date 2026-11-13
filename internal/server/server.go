@@ -12,8 +12,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -83,6 +85,24 @@ func withSecurityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:")
+		// State-changing API endpoints must not accept simple cross-site form
+		// submissions. CORS preflight blocks browsers from sending JSON across
+		// origins; explicitly check Origin too. This is not authentication or
+		// a complete defence against DNS rebinding / hostile local clients.
+		if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/") {
+			mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+			if err != nil || mediaType != "application/json" {
+				http.Error(w, "требуется application/json", http.StatusUnsupportedMediaType)
+				return
+			}
+			if origin := r.Header.Get("Origin"); origin != "" {
+				u, err := url.Parse(origin)
+				if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || !strings.EqualFold(u.Host, r.Host) {
+					http.Error(w, "недопустимый источник запроса", http.StatusForbidden)
+					return
+				}
+			}
+		}
 		next.ServeHTTP(w, r)
 	})
 }

@@ -11,6 +11,11 @@ function between(start, end) {
 }
 
 const ctx = vm.createContext({});
+vm.runInContext(between('  function fmtAddr(str)', '  document.addEventListener("blur"'), ctx);
+assert.equal(ctx.fmtAddr('192.168.088.001/24'), '192.168.88.1/24');
+for (const invalid of ['10.0.0.300/24', '10.0.0.1/40', '1.2.3.4.5', 'abc192.168.1.1']) {
+  assert.equal(ctx.fmtAddr(invalid), invalid);
+}
 vm.runInContext(between('  function isWifi(i)', '  function applyInterfaces(list)'), ctx);
 assert.equal(ctx.preferLan([
   {name: 'ether1', type: 'ethernet'},

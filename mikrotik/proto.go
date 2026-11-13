@@ -37,13 +37,18 @@ func writeWord(w io.Writer, s string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := w.Write(hdr); err != nil {
+	if n, err := w.Write(hdr); err != nil {
 		return err
+	} else if n != len(hdr) {
+		return io.ErrShortWrite
 	}
 	if s == "" {
 		return nil
 	}
-	_, err = io.WriteString(w, s)
+	n, err := io.WriteString(w, s)
+	if err == nil && n != len(s) {
+		return io.ErrShortWrite
+	}
 	return err
 }
 
@@ -54,7 +59,10 @@ func writeSentence(w io.Writer, words ...string) error {
 			return err
 		}
 	}
-	_, err := w.Write([]byte{0})
+	n, err := w.Write([]byte{0})
+	if err == nil && n != 1 {
+		return io.ErrShortWrite
+	}
 	return err
 }
 
@@ -64,18 +72,19 @@ func readLength(r io.Reader) (int, error) {
 	if _, err := io.ReadFull(r, b[:]); err != nil {
 		return 0, err
 	}
-	var extra, val int
+	var extra int
+	var val uint64
 	switch {
 	case b[0]&0x80 == 0x00:
 		return int(b[0]), nil
 	case b[0]&0xC0 == 0x80:
-		extra, val = 1, int(b[0]&0x3F)
+		extra, val = 1, uint64(b[0]&0x3F)
 	case b[0]&0xE0 == 0xC0:
-		extra, val = 2, int(b[0]&0x1F)
+		extra, val = 2, uint64(b[0]&0x1F)
 	case b[0]&0xF0 == 0xE0:
-		extra, val = 3, int(b[0]&0x0F)
-	case b[0]&0xF8 == 0xF0:
-		extra, val = 4, int(b[0]&0x07)
+		extra, val = 3, uint64(b[0]&0x0F)
+	case b[0] == 0xF0:
+		extra, val = 4, 0
 	default:
 		return 0, fmt.Errorf("некорректный байт длины 0x%02x", b[0])
 	}
@@ -84,15 +93,25 @@ func readLength(r io.Reader) (int, error) {
 		return 0, err
 	}
 	for _, c := range buf {
-		val = val<<8 | int(c)
+		val = val<<8 | uint64(c)
 	}
-	return val, nil
+	if val > maxAPIWordBytes {
+		return 0, fmt.Errorf("слово RouterOS API превышает допустимый размер")
+	}
+	return int(val), nil
 }
 
+const (
+	maxAPIWordBytes     = 8 << 20
+	maxAPISentenceBytes = 16 << 20
+	maxAPISentenceWords = 65536
+)
+
 // readSentence читает предложение до нулевого слова-терминатора.
-// Пустое слово в протоколе RouterOS всегда означает конец предложения.
+// Ограничиваем размеры: ответ роутера является недоверенным вводом.
 func readSentence(r io.Reader) ([]string, error) {
 	var words []string
+	total := 0
 	for {
 		n, err := readLength(r)
 		if err != nil {
@@ -101,6 +120,10 @@ func readSentence(r io.Reader) ([]string, error) {
 		if n == 0 {
 			return words, nil
 		}
+		if n > maxAPIWordBytes || total > maxAPISentenceBytes-n || len(words) >= maxAPISentenceWords {
+			return nil, fmt.Errorf("ответ RouterOS API превышает допустимый размер")
+		}
+		total += n
 		buf := make([]byte, n)
 		if _, err := io.ReadFull(r, buf); err != nil {
 			return nil, err

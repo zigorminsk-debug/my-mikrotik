@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -89,6 +90,29 @@ func truncate(s string) string {
 		return s[:30]
 	}
 	return s
+}
+
+func TestReadSentenceRejectsOversizedAndReservedLengths(t *testing.T) {
+	for _, in := range [][]byte{
+		{0xf0, 0xff, 0xff, 0xff, 0xff}, // cannot fit a 32-bit int and must not allocate
+		{0xf1, 0, 0, 0, 1},             // reserved control prefix
+	} {
+		if _, err := readSentence(bytes.NewReader(in)); err == nil {
+			t.Errorf("accepted invalid length %x", in)
+		}
+	}
+	prefix, _ := encodeLength(maxAPIWordBytes + 1)
+	if _, err := readSentence(bytes.NewReader(prefix)); err == nil {
+		t.Error("accepted oversized word")
+	}
+}
+
+func TestReadSentenceLimitsWordCount(t *testing.T) {
+	in := bytes.Repeat([]byte{1, 'x'}, maxAPISentenceWords+1)
+	in = append(in, 0)
+	if _, err := readSentence(bytes.NewReader(in)); err == nil {
+		t.Error("accepted excessive word count")
+	}
 }
 
 func TestSplitAttr(t *testing.T) {
@@ -510,4 +534,41 @@ func TestDefaultPorts(t *testing.T) {
 	if p := apiPort(&Params{Port: 1234}); p != 1234 {
 		t.Errorf("apiPort(общий порт) = %d, ожидалось 1234", p)
 	}
+}
+
+type shortWriter struct{}
+
+func (shortWriter) Write(p []byte) (int, error) { return 0, nil }
+func TestAPIShortWrites(t *testing.T) {
+	if err := writeWord(shortWriter{}, "test"); !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("word: %v", err)
+	}
+	if err := writeSentence(shortWriter{}); !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("sentence: %v", err)
+	}
+}
+
+func TestAPIResponseSentenceLimit(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer server.Close()
+		if _, err := readSentence(server); err != nil {
+			return
+		}
+		for i := 0; i < 50001; i++ {
+			if err := writeSentence(server, "!re", "=name=x"); err != nil {
+				return
+			}
+		}
+	}()
+	c := &apiClient{conn: client, ctx: context.Background()}
+	_, _, err := c.exec("/test")
+	if err == nil || !strings.Contains(err.Error(), "превышает") {
+		t.Fatalf("expected response limit: %v", err)
+	}
+	client.Close()
+	<-done
 }
