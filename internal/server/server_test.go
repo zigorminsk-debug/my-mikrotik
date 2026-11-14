@@ -850,3 +850,22 @@ func TestLANPlanAndApplyOverHTTP(t *testing.T) {
 		t.Fatal(result, writes)
 	}
 }
+
+func TestGeoRecoveryHTTPRequiresAcknowledgement(t *testing.T) {
+	app := newTestServer(t)
+	res, err := http.Post(app.URL+"/api/geonat/recover", "application/json", strings.NewReader(`{"conn":{"host":"127.0.0.1","protocol":"api"},"acknowledged":false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var out struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err = json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.OK || out.Error == "" {
+		t.Fatalf("missing acknowledgement accepted: %+v", out)
+	}
+}

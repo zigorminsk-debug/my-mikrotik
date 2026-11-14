@@ -612,6 +612,9 @@
                 <div id="geo-check-output" class="sec-note" aria-live="polite"></div>
                 <label class="checkbox"><input type="checkbox" id="geo-unknown-status"> Статус dst-nat не получен: я проверил правило вручную и разрешаю применение без подтверждения его включённого состояния</label>
                 <div class="sec-note">Используйте только если проверка сообщает «disabled не получено». Программа не сможет подтвердить, включён ли проброс; если он выключен, доступ не заработает. Остальные проверки и предупреждение о возможных изменениях firewall сохраняются.</div>
+                <div class="actions"><button type="button" class="ghost" id="geo-recover">Восстановить незавершённый список и применить</button></div>
+                <div id="geo-recovery-status" class="sec-note" aria-live="polite"></div>
+                <div class="sec-note">Для одного неполного набора с правилом allow без drop: программа проверит его, удалит только его правило и адреса и заново применит текущий список. Проброс dst-nat не удаляется. Во время восстановления защита и доступ могут измениться; при сбое возможны частичные изменения.</div>
                 <label class="checkbox"><input type="checkbox" id="geo-ack"> Я проверил ресурс, WAN-интерфейс и сохранил резервную копию</label>
                 <div class="sec-note">Выключите другие разделы: это отдельный скрипт для одного существующего dst-nat, он не создаёт проброс. Правила затрагивают только выбранный WAN, внутренний IPv4, порт и протокол; их accept имеет приоритет над существующими правилами. Все пробросы на этот внутренний адрес и порт через выбранный WAN попадут под правило, независимо от внешнего порта. IPv6, непроброшенные соединения и другие WAN не защищены. Уже работающие FastTrack-соединения могут сохраняться до очистки conntrack. Для каждого другого ресурса используйте отдельный идентификатор. Страны определяются по RIR-делегированию адресов: геолокация приблизительная, VPN/proxy её обходят. Обновляйте список вручную (кэш данных — 12 часов). Кнопка «Применить» проверяет устройство и наличие подходящего dst-nat перед изменением правил; она доступна для RouterOS 7 по API/REST при размере скрипта до 64 КиБ. Проверка не доказывает достижимость сервиса и не обеспечивает автоматический откат. Для MAC и больших скриптов доступен .rsc. Safe Mode не рассчитан на тысячи изменений.</div>
               </div>
@@ -2486,6 +2489,36 @@
       .then(function(r){return r.json();}).then(function(res){ if (!current()) return; if (!res.ok) throw new Error(res.error || "не удалось проверить"); $("geo-check-output").textContent=res.message || "Нет результата проверки."; })
       .catch(function(e){if(current()) $("geo-check-output").textContent="Проверка не выполнена: " + (e.message || "ошибка связи") + ". Настройки не изменены.";})
       .finally(function(){btn.disabled=false;});
+  });
+
+  // Repair a single incomplete managed set, then apply the current preview.
+  $("geo-recover").addEventListener("click", function () {
+    if (this.disabled || applyInProgress) return;
+    var status=$("geo-recovery-status"), issue=geoApplyIssue();
+    if (!lastInfo || !interfacesReady || connectedKey!==connectionKey() || !chk("chk-geoNat") || !chk("geo-ack") || issue) {status.textContent=issue || "Подключитесь, создайте предпросмотр и подтвердите резервную копию.";return;}
+    var source=currentScript, geoPreview=currentGeoPreview, device=lastInfo, key=connectedKey, seq=previewSeq, params=currentGeoCheckParams(), unknown=chk("geo-unknown-status"), conn=connPayload(), btn=this;
+    conn.protocol=device.protocol;
+    if (!window.confirm("Восстановить незавершённый набор и применить новый белый список?\n\nБудут удалены только совпадающие служебные allow и список адресов; dst-nat не удаляется. Доступ и защита могут измениться. При сбое возможны частичные изменения, автоматического отката нет.\n\n" + (unknown ? "Статус dst-nat может оставаться неизвестным. " : "") + "Резервная копия сохранена, локальный доступ есть?")) return;
+    function current(){return seq===previewSeq && lastInfo===device && connectedKey===key && connectionKey()===key && interfacesReady && currentScript===source && currentGeoPreview===geoPreview && JSON.stringify(currentGeoCheckParams())===JSON.stringify(params);}
+    clearGeoCheck();applyInProgress=true;setActions(true);btn.disabled=true;status.textContent="Проверяем и восстанавливаем неполный набор…";
+    var phase="recovery";
+    fetch("/api/geonat/recover",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({conn:conn,device:device,geoNat:params,acknowledged:true})})
+    .then(function(r){return r.json();}).then(function(res){
+      if(!res.ok) throw new Error(res.error || "очистка не выполнена");
+      phase="cleaned";
+      if(!current()) throw new Error("Параметры изменились. Неполный набор очищен; новый список не применён.");
+      status.textContent="Неполный набор очищен. Повторно проверяем роутер и применяем список…";
+      phase="apply";
+      return fetch("/api/geonat/apply",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({conn:conn,device:geoPreview.device,interfaces:geoPreview.interfaces,geoNat:geoPreview.geoNat,generatedAt:geoPreview.generatedAt,script:source,allowUnknownNatStatus:unknown})});
+    }).then(function(r){return r.json();}).then(function(res){
+      if(!res.ok){var e=new Error(res.error || "применение не завершено");e.geoPreflight=res.stage==="preflight";throw e;}
+      status.textContent="Очистка и команда применения завершились без ошибки" + (current()?"":" (для прежних параметров)") + ". Проверьте порядок правил и доступ новых соединений; реальная защита не подтверждена.";
+      if(current()) setScriptState("проверить правила","good");
+    }).catch(function(e){
+      if(phase==="recovery") status.textContent="Восстановление не завершено: "+(e.message||"ошибка связи")+". Изменения могли быть частичными; проверьте firewall и список адресов перед повтором.";
+      else if(phase==="cleaned") status.textContent=e.message;
+      else status.textContent="Неполный набор очищен, но применение не завершено: "+(e.message||"ошибка связи")+(e.geoPreflight ? ". Применение остановилось до записи." : ". Применение могло изменить настройки частично; проверьте firewall перед повтором.");
+    }).finally(function(){applyInProgress=false;btn.disabled=false;setActions(!!currentScript && !!lastInfo && interfacesReady && connectedKey===connectionKey());});
   });
 
   // A separate LAN plan is bound to the connection and form generation.

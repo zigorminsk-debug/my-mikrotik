@@ -85,6 +85,7 @@ func NewMux(opt Options) http.Handler {
 	mux.HandleFunc("/api/apply", handleApply(ver))
 	mux.HandleFunc("/api/geonat/apply", handleGeoNATApply(ver))
 	mux.HandleFunc("/api/geonat/check", handleGeoNATCheck(ver))
+	mux.HandleFunc("/api/geonat/recover", handleGeoNATRecover(ver))
 	mux.HandleFunc("/api/ppp-radius/apply", handlePPPRadiusApply(ver))
 	mux.HandleFunc("/api/lan/plan", handleLAN(ver, false))
 	mux.HandleFunc("/api/lan/apply", handleLAN(ver, true))
@@ -374,6 +375,38 @@ func handleGeoNATCheck(ver string) http.HandlerFunc {
 			Message string `json:"message"`
 			Version string `json:"version,omitempty"`
 		}{true, matched, message, ver})
+	}
+}
+
+// Recovery is narrowly scoped to one partial managed GeoNAT set, never NAT.
+func handleGeoNATRecover(ver string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+			return
+		}
+		var req mikrotik.GeoRecoveryRequest
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, apiResponse{OK: false, Error: "некорректный запрос"})
+			return
+		}
+		if !applyGate.TryLock() {
+			writeJSON(w, http.StatusOK, apiResponse{OK: false, Error: "другое действие ещё выполняется", Version: ver})
+			return
+		}
+		defer applyGate.Unlock()
+		ctx, cancel := context.WithTimeout(r.Context(), 180*time.Second)
+		defer cancel()
+		count, err := mikrotik.RecoverGeoNAT(ctx, req)
+		if err != nil {
+			writeJSON(w, http.StatusOK, apiResponse{OK: false, Error: err.Error(), Version: ver})
+			return
+		}
+		writeJSON(w, http.StatusOK, struct {
+			OK      bool   `json:"ok"`
+			Count   int    `json:"count"`
+			Version string `json:"version,omitempty"`
+		}{true, count, ver})
 	}
 }
 

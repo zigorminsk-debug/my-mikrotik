@@ -45,6 +45,7 @@ jobs:
           node web/devices.test.cjs
           node web/apply.test.cjs
           node web/geonat-check.test.cjs
+          node web/geonat-recovery.test.cjs
 
       - name: go vet
         run: go vet ./...
