@@ -18,7 +18,7 @@ function setup() {
     currentScript:':put 1', connectedKey:'key', lastInfo:{protocol:'api',routeros:'7.25.1'}, interfacesReady:true, previewSeq:1, previewTimer:null,
     connectionKey:()=> 'key', connPayload:()=>({host:'192.0.2.1'}),
     setScriptState:s=>{state=s}, protoLabel:p=>p, window:{confirm:()=>true},
-    clearTimeout(){}, setTimeout(){return 1}, preview(){}, invalidateConnection(){throw Error('invalidated')},
+    clearTimeout(){}, setTimeout(){return 1}, preview(){}, clearLiveLANPlan(){}, invalidateConnection(){throw Error('invalidated')},
     fetch:(url,opts)=>{ requests++; lastRequest={url,body:JSON.parse(opts.body)}; return new Promise(resolve=>{resolveFetch=resolve}); },
   });
   vm.runInContext(between('  function geoApplyIssue()', '  // ------------------------------------------------------------------\n  // предпросмотр'),ctx);

@@ -38,7 +38,7 @@ func ApplyScript(ctx context.Context, p Params, source string) (string, error) {
 	if strings.Contains(source, "# MTI-PPP-RADIUS-PREVIEW-ONLY") || strings.Contains(source, "# MTI-PPP-RADIUS-GUARDED-APPLY") {
 		return "", fmt.Errorf("RADIUS PPP нельзя применять через общий endpoint: используйте кнопку с проверкой")
 	}
-	if strings.Contains(source, "# MTI-LAN-PREVIEW-ONLY") {
+	if strings.Contains(source, "# MTI-LAN-PREVIEW-ONLY") || strings.Contains(source, "# MTI-LAN-GUARDED-APPLY") {
 		return "", fmt.Errorf("изменение LAN доступно только для предпросмотра: требуется проверка конфликтов и безопасное восстановление доступа")
 	}
 	if strings.Contains(source, "# MTI-USB-PREVIEW-ONLY") {

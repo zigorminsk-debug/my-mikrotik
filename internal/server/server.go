@@ -84,6 +84,8 @@ func NewMux(opt Options) http.Handler {
 	mux.HandleFunc("/api/apply", handleApply(ver))
 	mux.HandleFunc("/api/geonat/apply", handleGeoNATApply(ver))
 	mux.HandleFunc("/api/ppp-radius/apply", handlePPPRadiusApply(ver))
+	mux.HandleFunc("/api/lan/plan", handleLAN(ver, false))
+	mux.HandleFunc("/api/lan/apply", handleLAN(ver, true))
 	mux.HandleFunc("/api/log", handleLog(ver))
 
 	return withSecurityHeaders(mux)
@@ -327,6 +329,44 @@ func handleGeoNATApply(ver string) http.HandlerFunc {
 			Script   string `json:"script"`
 			Version  string `json:"version,omitempty"`
 		}{true, proto, mikrotik.ScriptName(), ver})
+	}
+}
+
+// LAN planning reads current state; applying regenerates the plan before writes.
+func handleLAN(ver string, apply bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+			return
+		}
+		var req mikrotik.LANApplyRequest
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, apiResponse{OK: false, Error: "некорректный запрос"})
+			return
+		}
+		if !applyGate.TryLock() {
+			writeJSON(w, http.StatusOK, apiResponse{OK: false, Error: "другое применение ещё выполняется", Version: ver})
+			return
+		}
+		defer applyGate.Unlock()
+		ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+		defer cancel()
+		var plan *mikrotik.LANPlan
+		var err error
+		if apply {
+			plan, err = mikrotik.ApplyLAN(ctx, req)
+		} else {
+			plan, err = mikrotik.PlanLAN(ctx, req)
+		}
+		if err != nil {
+			writeJSON(w, http.StatusOK, apiResponse{OK: false, Error: err.Error(), Version: ver})
+			return
+		}
+		writeJSON(w, http.StatusOK, struct {
+			OK      bool              `json:"ok"`
+			Plan    *mikrotik.LANPlan `json:"plan"`
+			Version string            `json:"version,omitempty"`
+		}{true, plan, ver})
 	}
 }
 

@@ -728,3 +728,78 @@ func TestPPPRadiusGuardedApplyHTTP(t *testing.T) {
 		t.Fatalf("tampered %+v", out)
 	}
 }
+
+func TestLANPlanAndApplyOverHTTP(t *testing.T) {
+	writes := 0
+	router := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /rest/system/identity":
+			fmt.Fprint(w, `[{"name":"router"}]`)
+		case "GET /rest/system/resource":
+			fmt.Fprint(w, `[{"version":"7.15","board-name":"hAP","architecture-name":"arm"}]`)
+		case "GET /rest/interface":
+			fmt.Fprint(w, `[{".id":"*1","name":"bridge","disabled":false}]`)
+		case "GET /rest/interface/bridge/port":
+			fmt.Fprint(w, `[]`)
+		case "GET /rest/ip/address":
+			fmt.Fprint(w, `[{".id":"*2","address":"192.168.88.1/24","interface":"bridge","disabled":false,"dynamic":false,"invalid":false}]`)
+		case "GET /rest/ip/dhcp-server":
+			fmt.Fprint(w, `[{".id":"*3","name":"defconf","interface":"bridge","address-pool":"default","disabled":false,"dynamic":false,"invalid":false}]`)
+		case "GET /rest/ip/pool":
+			fmt.Fprint(w, `[]`)
+		case "GET /rest/ip/dhcp-server/network":
+			fmt.Fprint(w, `[{".id":"*4","address":"192.168.88.0/24","gateway":"192.168.88.1","dns-server":"192.168.88.1"}]`)
+		case "GET /rest/system/script":
+			fmt.Fprint(w, `[]`)
+		case "POST /rest/system/script/remove", "PUT /rest/system/script", "POST /rest/system/script/run":
+			writes++
+			fmt.Fprint(w, `{}`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(500)
+		}
+	}))
+	defer router.Close()
+	u, _ := url.Parse(router.URL)
+	_, ps, _ := net.SplitHostPort(u.Host)
+	port, _ := strconv.Atoi(ps)
+	req := mikrotik.LANApplyRequest{Conn: mikrotik.Params{Host: "127.0.0.1", RESTPort: port, User: "admin", Protocol: "rest"}, Device: &mikrotik.Info{Identity: "router", RouterOS: "7.15", Protocol: "rest", Architecture: "arm", Diagnostics: &mikrotik.IdentityDiagnostics{ResourceBoard: "hAP"}, Packages: []mikrotik.Package{{Name: "routeros"}}}, Interfaces: []mikrotik.Iface{{Name: "bridge", Type: "bridge"}}, LAN: mikrotik.LanSettings{Enabled: true, Interface: "bridge", Address: "192.168.50.1/24"}, DHCP: mikrotik.DHCPSettings{Enabled: true, Interface: "bridge", LeaseTime: "1d"}}
+	app := newTestServer(t)
+	post := func(path string, q mikrotik.LANApplyRequest) struct {
+		OK    bool              `json:"ok"`
+		Error string            `json:"error"`
+		Plan  *mikrotik.LANPlan `json:"plan"`
+	} {
+		t.Helper()
+		b, _ := json.Marshal(q)
+		resp, err := http.Post(app.URL+path, "application/json", bytes.NewReader(b))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var result struct {
+			OK    bool              `json:"ok"`
+			Error string            `json:"error"`
+			Plan  *mikrotik.LANPlan `json:"plan"`
+		}
+		if err = json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	plan := post("/api/lan/plan", req)
+	if !plan.OK || plan.Plan == nil || writes != 0 {
+		t.Fatal(plan, writes)
+	}
+	req.Script = plan.Plan.Script
+	req.Fingerprint = plan.Plan.Fingerprint
+	result := post("/api/lan/apply", req)
+	if result.OK || writes != 0 {
+		t.Fatal(result, writes)
+	}
+	req.Acknowledged = true
+	result = post("/api/lan/apply", req)
+	if !result.OK || writes != 3 {
+		t.Fatal(result, writes)
+	}
+}

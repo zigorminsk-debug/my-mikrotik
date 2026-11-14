@@ -37,6 +37,10 @@ func radiusRESTRead(ctx context.Context, rc *restClient, path string) ([]map[str
 	if !ok {
 		return nil, fmt.Errorf("неизвестный раздел")
 	}
+	return readRESTProperties(ctx, rc, path, props)
+}
+
+func readRESTProperties(ctx context.Context, rc *restClient, path, props string) ([]map[string]string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rc.base+"/rest"+path+"?.proplist="+url.QueryEscape(props), nil)
 	if err != nil {
 		return nil, err

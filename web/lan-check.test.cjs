@@ -9,7 +9,7 @@ class Reader{readAsText(f){this.file=f;pending.push(this)}finish(){this.result=t
 const ctx=vm.createContext({$:id=>el[id],FileReader:Reader,Promise,Map,Set,Blob,URL,document:{},setTimeout,copyText:()=>Promise.resolve(),flash(){},showError(){},fetch(){calls++;throw Error('network forbidden')}});
 vm.runInContext(part('  var snapshotCompareSeq = 0','  function compareSnapshotReports('),ctx);
 vm.runInContext(part('  function readComparisonFile(', '  ["compare-before", "compare-after"]'),ctx);
-vm.runInContext(part('  // Offline advisory only;', '  loadPrefs();'),ctx);
+vm.runInContext(part('  // Offline advisory only;', '  // A separate LAN plan'),ctx);
 const form=vm.createContext({protoLabel:x=>x});vm.runInContext(part('  function formatNetworkSnapshot(', '  $("snapshot-run").addEventListener'),form);
 const ok=rows=>({status:'ok',rows});
 const snapshot={protocol:'api',sections:{
@@ -22,7 +22,7 @@ const snapshot={protocol:'api',sections:{
 const report=form.formatNetworkSnapshot(snapshot,'v0.2.18');
 let out=ctx.inspectLanSnapshot(report,'192.168.88.5/24','bridge');
 assert.match(out,/Пересечение адреса\/маски: 192\.168\.88\.1\/24/);assert.match(out,/Пересечение DHCP-сети/);assert.match(out,/Пересечение пула/);assert.match(out,/На указанном интерфейсе/);assert.match(out,/с неизвестным интерфейсом или состоянием/);assert.match(out,/Серверов с неизвестным состоянием/);
-assert.match(out,/Найдено пересечений\/совпадений: 4/);assert.match(out,/Начало \(UTC\): —/);assert.match(out,/Автоматическое применение LAN остаётся заблокировано/);
+assert.match(out,/Найдено пересечений\/совпадений: 4/);assert.match(out,/Начало \(UTC\): —/);assert.match(out,/Для применения LAN нужен отдельный план/);
 assert.match(out,/отсутствие предупреждений не доказывает безопасности/);assert.match(out,/IPv6/);
 out=ctx.inspectLanSnapshot(report,'172.16.1.1/24','');assert.match(out,/Пересечение адреса DHCP-клиента/);assert.match(out,/интерфейс не указан/);
 out=ctx.inspectLanSnapshot(report,'10.1.2.3/32','bridge');assert.match(out,/10\.0\.0\.1\/8.*disabled=true/);

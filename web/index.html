@@ -387,6 +387,16 @@
     </section>
 
     <div id="build-body" style="display:none">
+      <section class="card" id="lan-live-card">
+        <h2>Применение LAN / DHCP на тестовом устройстве</h2>
+        <div class="hint">Включите ниже Addresses и при необходимости DHCP Server, заполните поля, затем подготовьте план по текущей конфигурации роутера. Этот отдельный способ изменит только LAN и выбранный DHCP; остальные разделы конструктора он не применяет. Для API/REST; MAC пока не поддерживается.</div>
+        <div class="warn-box">Смена IP может оборвать доступ и оставить DHCP частично изменённым. Автоматического отката нет. Перед продолжением сохраните резервную копию и подготовьте локальный доступ к тестовому устройству.</div>
+        <div class="row"><button type="button" class="ghost" id="lan-live-plan">Подготовить план LAN</button></div>
+        <pre id="lan-live-output" class="mono" aria-live="polite" style="white-space:pre-wrap;word-break:break-word;max-height:26rem;overflow:auto"></pre>
+        <label class="checkbox"><input type="checkbox" id="lan-live-ack"> Я проверил план, сохранил резервную копию и имею локальный доступ для восстановления</label>
+        <div class="row"><button type="button" class="ok" id="lan-live-apply" disabled>Применить LAN / DHCP</button></div>
+        <div class="hint" id="lan-live-status" aria-live="polite"></div>
+      </section>
       <div class="builder">
         <!-- меню как в RouterOS -->
         <section class="card">
@@ -414,7 +424,7 @@
                     <input id="lan-addr" class="cidr" value="192.168.88.1/24" spellcheck="false" placeholder="192.168.88.1/24">
                   </label>
                 </div>
-                <div class="sec-note" id="lan-note"></div><div class="sec-note">Изменение адреса LAN может оборвать связь и оставить DHCP или DNS настроенными частично. Автоматическое применение временно заблокировано до проверки конфликтов и безопасного возврата. Скопированный или скачанный скрипт остаётся исполняемым — не запускайте его.</div>
+                <div class="sec-note" id="lan-note"></div><div class="sec-note">Изменение LAN может оборвать связь. Для тестового применения используйте отдельный план LAN выше; общий скрипт по-прежнему нельзя применять кнопкой конструктора. Скопированный скрипт остаётся исполняемым и может быть опасен.</div>
               </div>
             </div>
 
@@ -758,6 +768,7 @@
   var applyInProgress = false;
   var snapshotSeq = 0;
   var snapshotText = "";
+  var lanLiveSeq = 0, lanLivePlan = null, lanLiveBusy = false;
 
   var LABELS = [
     ["identity", "Идентификатор"],
@@ -892,6 +903,7 @@
     if (!lastInfo && connectedKey === null) return;
     if (force !== true && connectedKey !== null && connectedKey === connectionKey()) return;
     connectedKey = null;
+    clearLiveLANPlan();
     clearNetworkSnapshot();
     $("build-ok").style.display = "none"; $("build-ok").textContent = "";
     interfacesReady = false;
@@ -1337,7 +1349,7 @@
     else if (enabled && (currentScript.indexOf("# MTI-PPP-RADIUS-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-PPP-RADIUS-GUARDED-APPLY") !== -1)) reason = "RADIUS PPP: создайте актуальный отдельный предпросмотр.";
     else if (enabled && chk("chk-security")) reason = "Защита WinBox: автоматическое применение отключено. Сначала проверьте скрипт и локальный доступ.";
     else if (enabled && currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1) reason = "Экспериментальный USB-режим доступен только для предпросмотра.";
-    else if (enabled && currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1) reason = "Изменение LAN доступно только для предпросмотра до проверки безопасного восстановления доступа.";
+    else if (enabled && currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1) reason = "LAN применяется отдельно через «Подготовить план LAN» выше; общий скрипт содержит прежнюю небезопасную последовательность.";
     $("btn-apply").disabled = !enabled || !!reason;
     $("apply-reason").style.display = reason ? "block" : "none";
     $("apply-reason").textContent = reason;
@@ -1347,6 +1359,7 @@
   // предпросмотр скрипта
   // ------------------------------------------------------------------
   function schedulePreview() {
+    clearLiveLANPlan();
     clearTimeout(previewTimer);
     previewSeq++; // сразу делаем предыдущий результат недействительным
     // A previous success is not evidence that the newly generated script ran.
@@ -1360,6 +1373,7 @@
 
   function preview() {
     if (!lastInfo || !interfacesReady || connectedKey !== connectionKey()) return;
+    clearLiveLANPlan();
     var seq = ++previewSeq;
     var payload = { device: lastInfo, interfaces: lastIfaces, settings: collect() };
 
@@ -1569,6 +1583,7 @@
   // подключение и загрузка данных
   // ------------------------------------------------------------------
   function loadInterfaces() {
+    clearLiveLANPlan();
     var device = lastInfo;
     var key = connectedKey;
     var seq = ++interfaceSeq;
@@ -1640,6 +1655,7 @@
     var btn = $("go");
     if (btn.disabled) return;
     // Старый скрипт не должен применяться к другому устройству после неудачного входа.
+    clearLiveLANPlan();
     $("build-ok").style.display = "none"; $("build-ok").textContent = "";
     clearNetworkSnapshot();
     lastInfo = null;
@@ -2409,7 +2425,7 @@
     if (omitted) output.push("", "Вывод ограничен 200 подробными строками; не показано: " + omitted + ".");
     output.push("", "Найдено пересечений/совпадений: " + count + "; неопределённых случаев или разделов: " + unknown + ".",
       "Не проверяются все маршруты, bridge/VLAN, firewall, аренды DHCP, DNS, клиенты, статические IP, IPv6, связанные сервисы и текущее состояние. Отключённые и динамические записи не исключаются.",
-      "Совпадение может быть штатным, а отсутствие предупреждений не доказывает безопасности или отсутствия конфликтов. Данные не атомарны. Автоматическое применение LAN остаётся заблокировано; возможна потеря доступа.");
+      "Совпадение может быть штатным, а отсутствие предупреждений не доказывает безопасности или отсутствия конфликтов. Данные не атомарны. Для применения LAN нужен отдельный план по текущему состоянию роутера; возможна потеря доступа.");
     return output.join("\n");
   }
   function resetLanCheck() {
@@ -2438,6 +2454,54 @@
     if (!lanCheckText) return; var a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([lanCheckText], {type:"text/plain;charset=utf-8"})); a.download = "mikrotik-lan-snapshot-check.txt";
     document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 0); flash(this, "Файл сохранён ✓");
+  });
+
+  // A separate LAN plan is bound to the connection and form generation.
+  function clearLiveLANPlan() {
+    lanLiveSeq++; lanLivePlan = null;
+    $("lan-live-output").textContent = ""; $("lan-live-ack").checked = false; $("lan-live-apply").disabled = true;
+    if (!lanLiveBusy) $("lan-live-status").textContent = "";
+  }
+  function liveLANParams() {
+    return {lan:{enabled:chk("chk-lan"),iface:val("lan-iface"),address:val("lan-addr")},
+      dhcp:{enabled:chk("chk-dhcp"),iface:val("dhcp-iface"),poolStart:val("dhcp-start"),poolEnd:val("dhcp-end"),leaseTime:val("dhcp-lease")}};
+  }
+  function liveLANCurrent(state) {
+    return !!state && lastInfo === state.device && connectedKey === state.key && connectionKey() === state.key && interfacesReady && previewSeq === state.previewSeq && JSON.stringify(liveLANParams()) === state.settingsKey;
+  }
+  $("lan-live-ack").addEventListener("change", function () { $("lan-live-apply").disabled = !this.checked || !liveLANCurrent(lanLivePlan) || lanLiveBusy || applyInProgress; });
+  $("lan-live-plan").addEventListener("click", function () {
+    if (lanLiveBusy || applyInProgress) { $("lan-live-status").textContent = "Дождитесь окончания текущего действия."; return; }
+    if (!lastInfo || !interfacesReady || connectedKey !== connectionKey()) { $("lan-live-status").textContent = "Сначала подключитесь к устройству."; return; }
+    if (lastInfo.protocol !== "api" && lastInfo.protocol !== "rest") { $("lan-live-status").textContent = "План LAN доступен по API/REST, но не по MAC."; return; }
+    var settings = liveLANParams(); if (!settings.lan.enabled) { $("lan-live-status").textContent = "Включите раздел Addresses и укажите параметры LAN."; return; }
+    clearLiveLANPlan(); var seq = lanLiveSeq, btn = this, device = lastInfo, key = connectedKey;
+    var state = {device:device,key:key,previewSeq:previewSeq,settingsKey:JSON.stringify(settings),interfaces:lastIfaces.slice(),lan:settings.lan,dhcp:settings.dhcp};
+    var conn = connPayload(); conn.protocol = device.protocol; lanLiveBusy = true; btn.disabled = true; $("lan-live-status").textContent = "Читаем текущую конфигурацию…";
+    fetch("/api/lan/plan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({conn:conn,device:device,interfaces:state.interfaces,lan:state.lan,dhcp:state.dhcp})})
+      .then(function(r){return r.json();}).then(function(res){
+        if (seq !== lanLiveSeq || !liveLANCurrent(state)) return;
+        if (!res.ok || !res.plan) throw new Error(res.error || "не удалось подготовить план");
+        state.plan = res.plan; lanLivePlan = state;
+        $("lan-live-output").textContent = res.plan.summary + "\n\nТочный скрипт (исполняемый):\n" + res.plan.script;
+        $("lan-live-status").textContent = "Проверьте план и подтвердите наличие копии и локального доступа.";
+      }).catch(function(e){if (seq === lanLiveSeq) $("lan-live-status").textContent = "План не создан: " + (e.message || "ошибка чтения");})
+      .finally(function(){lanLiveBusy=false;btn.disabled=false;if(seq!==lanLiveSeq || !liveLANCurrent(state)) $("lan-live-status").textContent="Данные изменились во время проверки. Подготовьте план заново.";});
+  });
+  $("lan-live-apply").addEventListener("click", function () {
+    var state = lanLivePlan;
+    if (lanLiveBusy || applyInProgress || !$("lan-live-ack").checked || !liveLANCurrent(state)) { clearLiveLANPlan(); return; }
+    if (!window.confirm("Применить показанный план LAN/DHCP на " + $("host").value.trim() + "?\n\nВозможны разрыв доступа и частичное применение. Автоматического отката нет. Резервная копия и локальный доступ для восстановления подготовлены?")) return;
+    var conn = connPayload(); conn.protocol = state.device.protocol;
+    var body={conn:conn,device:state.device,interfaces:state.interfaces,lan:state.lan,dhcp:state.dhcp,acknowledged:true,fingerprint:state.plan.fingerprint,script:state.plan.script};
+    var btn=this; lanLivePlan=null; lanLiveSeq++; lanLiveBusy=true; applyInProgress=true; btn.disabled=true; $("lan-live-plan").disabled=true; $("lan-live-ack").checked=false; setActions(false);
+    $("lan-live-status").textContent="Повторная проверка и применение…";
+    fetch("/api/lan/apply",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
+      .then(function(r){return r.json();}).then(function(res){
+        if(!res.ok) throw new Error(res.error || "не удалось применить");
+        $("lan-live-status").textContent = "Команда выполнена. Проверьте LAN, DHCP, DNS и доступ к роутеру; это не подтверждение работоспособности клиентов." + (liveLANCurrent(state) ? "" : " Ответ относится к ранее выбранному устройству или параметрам.");
+      }).catch(function(e){ $("lan-live-status").textContent = "Не удалось подтвердить результат: " + (e.message || "ошибка связи") + ". Настройки могли измениться частично; проверьте роутер локально, не повторяйте вслепую."; })
+      .finally(function(){lanLiveBusy=false;applyInProgress=false;$("lan-live-plan").disabled=false;setActions(!!currentScript && !!lastInfo && interfacesReady && connectedKey===connectionKey());});
   });
 
   loadPrefs();

@@ -48,7 +48,7 @@ Object.assign(ctx, {
   lastInfo: {model: 'old'}, connectedKey: 'old', interfacesReady: true,
   lastIfaces: [{name:'ether1'}], currentScript: 'old script', previewTimer: null,
   previewSeq: 0, connectionKey: () => 'new', clearTimeout() {},
-  clearNetworkSnapshot() {},
+  clearNetworkSnapshot() {}, clearLiveLANPlan() {},
   $: id => els[id], setActions(enabled) { ctx.actions = enabled; }, showError(msg) { ctx.error = msg; },
 });
 vm.runInContext(between('  function invalidateConnection(force)', '  ["host", "port", "user"'), ctx);
