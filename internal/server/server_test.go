@@ -378,6 +378,14 @@ func TestNetworkSnapshotOverHTTP(t *testing.T) {
 			io.WriteString(w, `[{"name":"router"}]`)
 		case "/rest/system/resource":
 			io.WriteString(w, `[{"board-name":"hAP","version":"7.15","architecture-name":"arm"}]`)
+		case "/rest/interface/bridge":
+			io.WriteString(w, `[{"name":"bridge","vlan-filtering":"true","comment":"topsecret"}]`)
+		case "/rest/interface/bridge/port":
+			io.WriteString(w, `[{"interface":"ether2","bridge":"bridge","pvid":"10"}]`)
+		case "/rest/interface/bridge/vlan":
+			w.WriteHeader(403)
+		case "/rest/interface/vlan":
+			io.WriteString(w, `[{"name":"vlan10","vlan-id":"10"}]`)
 		case "/rest/interface":
 			io.WriteString(w, `[{"name":"ether1","running":"true"}]`)
 		default:
@@ -394,7 +402,7 @@ func TestNetworkSnapshotOverHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := map[string]any{"conn": map[string]any{"host": host, "restPort": port, "user": "admin", "password": "topsecret", "protocol": "rest"}, "device": map[string]any{"protocol": "rest", "identity": "router", "routeros": "7.15", "architecture": "arm", "diagnostics": map[string]any{"resourceBoard": "hAP"}}}
+	req := map[string]any{"includeTopology": true, "conn": map[string]any{"host": host, "restPort": port, "user": "admin", "password": "topsecret", "protocol": "rest"}, "device": map[string]any{"protocol": "rest", "identity": "router", "routeros": "7.15", "architecture": "arm", "diagnostics": map[string]any{"resourceBoard": "hAP"}}}
 	b, _ := json.Marshal(req)
 	srv := newTestServer(t)
 	resp, err := http.Post(srv.URL+"/api/network-snapshot", "application/json", bytes.NewReader(b))
@@ -408,6 +416,16 @@ func TestNetworkSnapshotOverHTTP(t *testing.T) {
 	}
 	if resp.StatusCode != 200 || !strings.Contains(string(raw), `"name":"ether1"`) || strings.Contains(string(raw), "topsecret") {
 		t.Fatalf("response: %d %s", resp.StatusCode, raw)
+	}
+	var result struct {
+		Snapshot *mikrotik.NetworkSnapshot `json:"snapshot"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil || result.Snapshot == nil {
+		t.Fatalf("bad response: %v %s", err, raw)
+	}
+	sections := result.Snapshot.Sections
+	if sections["bridges"].Rows[0]["name"] != "bridge" || sections["bridgePorts"].Rows[0]["pvid"] != "10" || sections["bridgeVLANs"].Status != "error" || sections["vlanInterfaces"].Status != "ok" {
+		t.Fatalf("topology: %+v", sections)
 	}
 }
 

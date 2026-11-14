@@ -27,6 +27,10 @@ const errors=header+'\nИнтерфейсы:\n  Не удалось прочит
 out=ctx.compareSnapshotReports(one,errors);assert.match(out,/не прочитан, усечён или разобран неоднозначно/);assert.match(out,/Нет раздела во втором/);assert.doesNotMatch(out,/Только в первом/);
 const truncated=header+sec('Интерфейсы',[i1],'Показаны не все записи (лимит 500).');out=ctx.compareSnapshotReports(truncated,one);assert.match(out,/усечён/);
 const optional=header+sec('Интерфейсы',[i1])+sec('LTE: разовое чтение показателей',['name=lte1; rsrp=—']);out=ctx.compareSnapshotReports(optional,header+sec('Интерфейсы',[i1]));assert.match(out,/Нет раздела во втором/);
+const withBridge=header+sec('Интерфейсы',[i1])+sec('Bridge',['name=bridge; vlan-filtering=true']);
+out=ctx.compareSnapshotReports(withBridge,header+sec('Интерфейсы',[i1])); assert.match(out,/Bridge:\n  Нет раздела во втором/);
+out=ctx.compareSnapshotReports(withBridge,withBridge); assert.match(out,/Bridge:\n  Распознанные строки совпадают/);
+out=ctx.compareSnapshotReports(header+sec('Интерфейсы',[i1]),header+sec('Интерфейсы',[i1])); assert.doesNotMatch(out,/Bridge:/);
 assert.throws(()=>ctx.parseSnapshotReport('wrong'),/не похож/);
 assert.throws(()=>ctx.parseSnapshotReport(header+sec('Интерфейсы',[])+sec('Интерфейсы',[])),/повторяется/);
 assert.throws(()=>ctx.parseSnapshotReport(header+'\nИнтерфейсы:\n  1. name='+('x'.repeat(8193))+'\n'),/длинная строка/);

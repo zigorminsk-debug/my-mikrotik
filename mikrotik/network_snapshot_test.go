@@ -164,6 +164,9 @@ func TestCollectNetworkSnapshotAPI(t *testing.T) {
 			case "/system/resource/print":
 				_ = writeSentence(conn, "!re", "=board-name=hAP", "=architecture-name=arm", "=version=7.15")
 				_ = writeSentence(conn, "!done")
+			case "/interface/bridge/port/print":
+				_ = writeSentence(conn, "!re", "=interface=ether2", "=bridge=bridge", "=pvid=10", "=comment=PRIVATE")
+				_ = writeSentence(conn, "!done")
 			case "/ip/route/print":
 				_ = writeSentence(conn, "!re", "=dst-address=0.0.0.0/0", "=gateway=192.0.2.1", "=active=true")
 				_ = writeSentence(conn, "!done")
@@ -175,15 +178,22 @@ func TestCollectNetworkSnapshotAPI(t *testing.T) {
 	port := ln.Addr().(*net.TCPAddr).Port
 	p := Params{Host: "127.0.0.1", APIPort: port, User: "admin", Password: "secret", Protocol: "api"}
 	expected := &Info{Protocol: "api", Identity: "router", RouterOS: "7.15", Architecture: "arm", Diagnostics: &IdentityDiagnostics{ResourceBoard: "hAP"}}
-	s, err := CollectNetworkSnapshot(context.Background(), p, expected)
+	s, err := CollectNetworkSnapshotWithOptions(context.Background(), p, expected, NetworkSnapshotOptions{IncludeTopology: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(s.Sections["routes"].Rows) != 1 || s.Sections["routes"].Rows[0]["gateway"] != "192.0.2.1" {
 		t.Fatalf("routes: %+v", s.Sections["routes"])
 	}
+	if len(s.Sections["bridgePorts"].Rows) != 1 || s.Sections["bridgePorts"].Rows[0]["pvid"] != "10" {
+		t.Fatalf("bridge ports: %+v", s.Sections["bridgePorts"])
+	}
+	raw, _ := json.Marshal(s)
+	if strings.Contains(string(raw), "PRIVATE") {
+		t.Fatal("private data leaked")
+	}
 	got := <-commands
-	want := []string{"/login", "/system/identity/print", "/system/resource/print", "/interface/print", "/ip/address/print", "/ip/dhcp-client/print", "/ip/route/print", "/system/scheduler/print", "/system/script/environment/print", "/ip/dhcp-server/print", "/ip/pool/print", "/ip/dhcp-server/network/print"}
+	want := []string{"/login", "/system/identity/print", "/system/resource/print", "/interface/print", "/ip/address/print", "/ip/dhcp-client/print", "/ip/route/print", "/system/scheduler/print", "/system/script/environment/print", "/ip/dhcp-server/print", "/ip/pool/print", "/ip/dhcp-server/network/print", "/interface/bridge/print", "/interface/bridge/port/print", "/interface/bridge/vlan/print", "/interface/vlan/print"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("unexpected commands: %v", got)
 	}
@@ -221,5 +231,63 @@ func TestSnapshotLANFieldsAndConfidentiality(t *testing.T) {
 	b, _ := json.Marshal(s)
 	if strings.Contains(string(b), "PRIVATE-") {
 		t.Fatalf("private field leaked: %s", b)
+	}
+}
+
+func TestTopologySnapshotOptionalAndSafety(t *testing.T) {
+	calls := []string{}
+	read := func(path string) ([]map[string]string, error) {
+		calls = append(calls, path)
+		switch path {
+		case "/interface/bridge":
+			return []map[string]string{{"name": "bridge", "vlan-filtering": "true", "comment": "SECRET", "mac-address": "SECRET-MAC"}}, nil
+		case "/interface/bridge/port":
+			return []map[string]string{{"interface": "ether2", "bridge": "bridge", "pvid": "10", "secret": "SECRET"}}, nil
+		case "/interface/bridge/vlan":
+			return nil, fmt.Errorf("SECRET failure")
+		case "/interface/vlan":
+			return []map[string]string{{"name": "vlan10", "vlan-id": "10"}}, nil
+		}
+		return []map[string]string{}, nil
+	}
+	s := buildSnapshotWithOptions(context.Background(), "rest", read, false, false, false)
+	for _, spec := range topologySnapshotSpecs {
+		if _, ok := s.Sections[spec.id]; ok {
+			t.Fatalf("not opt-in: %s", spec.id)
+		}
+		for _, p := range calls {
+			if p == spec.path {
+				t.Fatalf("unexpected read %s", p)
+			}
+		}
+	}
+	calls = nil
+	s = buildSnapshotWithOptions(context.Background(), "rest", read, false, false, true)
+	if s.Sections["bridgeVLANs"].Status != "error" || s.Sections["vlanInterfaces"].Status != "ok" || s.Sections["bridgePorts"].Rows[0]["pvid"] != "10" {
+		t.Fatalf("bad partial snapshot: %+v", s.Sections)
+	}
+	if _, ok := s.Sections["bridges"].Rows[0]["disabled"]; ok {
+		t.Fatal("missing field must stay unknown")
+	}
+	b, _ := json.Marshal(s)
+	if strings.Contains(string(b), "SECRET") {
+		t.Fatalf("leaked field/error: %s", b)
+	}
+	calls = nil
+	s = buildSnapshotWithOptions(context.Background(), "api", read, true, true, true)
+	if s.Sections["bridgeVLANs"].Status != "error" || s.Sections["vlanInterfaces"].Status != "skipped" || s.Sections["failoverHistory"].Status != "skipped" {
+		t.Fatalf("API failure not stopped: %+v", s.Sections)
+	}
+	for _, p := range calls {
+		if p == "/interface/vlan" || p == "/log" {
+			t.Fatalf("read after API error: %s", p)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	calls = nil
+	s = buildSnapshotWithOptions(ctx, "api", read, true, false, true)
+	if len(calls) > 0 || s.Sections["bridges"].Status != "skipped" {
+		t.Fatal("cancelled snapshot read")
 	}
 }

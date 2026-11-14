@@ -48,15 +48,32 @@ var snapshotSpecs = []snapshotSpec{
 	{"dhcpNetworks", "/ip/dhcp-server/network", []string{"address", "gateway", "dns-server"}, nil},
 }
 
+// Opt-in topology fields are allowlisted; MACs, comments and other private
+// properties are deliberately excluded. Availability differs by RouterOS.
+var topologySnapshotSpecs = []snapshotSpec{
+	{"bridges", "/interface/bridge", []string{"name", "mtu", "protocol-mode", "vlan-filtering", "pvid", "igmp-snooping", "disabled", "running"}, nil},
+	{"bridgePorts", "/interface/bridge/port", []string{"interface", "bridge", "pvid", "frame-types", "ingress-filtering", "hw", "disabled", "inactive"}, nil},
+	{"bridgeVLANs", "/interface/bridge/vlan", []string{"bridge", "vlan-ids", "tagged", "untagged", "current-tagged", "current-untagged", "dynamic", "disabled"}, nil},
+	{"vlanInterfaces", "/interface/vlan", []string{"name", "interface", "vlan-id", "use-service-tag", "mtu", "disabled", "running"}, nil},
+}
+
 const maxSnapshotRows = 500
 
 type snapshotReader func(string) ([]map[string]string, error)
 
 // buildSnapshot does not return arbitrary router records: fields are allowlisted.
 func buildSnapshot(ctx context.Context, protocol string, read snapshotReader, stopOnError bool, includeHistory ...bool) *NetworkSnapshot {
+	return buildSnapshotWithOptions(ctx, protocol, read, stopOnError, len(includeHistory) > 0 && includeHistory[0], false)
+}
+
+func buildSnapshotWithOptions(ctx context.Context, protocol string, read snapshotReader, stopOnError, includeHistory, includeTopology bool) *NetworkSnapshot {
 	s := &NetworkSnapshot{Protocol: protocol, StartedAt: time.Now().UTC(), Sections: make(map[string]SnapshotSection)}
 	stopped := false
-	for _, spec := range snapshotSpecs {
+	specs := snapshotSpecs
+	if includeTopology {
+		specs = append(append([]snapshotSpec(nil), snapshotSpecs...), topologySnapshotSpecs...)
+	}
+	for _, spec := range specs {
 		section := SnapshotSection{Status: "skipped", Rows: []map[string]string{}}
 		if !stopped && ctx.Err() == nil {
 			recs, err := read(spec.path)
@@ -96,7 +113,7 @@ func buildSnapshot(ctx context.Context, protocol string, read snapshotReader, st
 		}
 		s.Sections[spec.id] = section
 	}
-	if len(includeHistory) > 0 && includeHistory[0] {
+	if includeHistory {
 		section := SnapshotSection{Status: "skipped", Rows: []map[string]string{}}
 		if !stopped && ctx.Err() == nil {
 			recs, err := read("/log")
@@ -116,8 +133,9 @@ func buildSnapshot(ctx context.Context, protocol string, read snapshotReader, st
 // Identity and resource are re-read in the same session before collecting sections;
 // matching them is only a consistency check, not proof of the physical device.
 type NetworkSnapshotOptions struct {
-	IncludeHistory bool
-	IncludeLTE     bool
+	IncludeHistory  bool
+	IncludeLTE      bool
+	IncludeTopology bool
 }
 
 func CollectNetworkSnapshot(ctx context.Context, p Params, expected *Info, includeHistory ...bool) (*NetworkSnapshot, error) {
@@ -242,7 +260,7 @@ func CollectNetworkSnapshotWithOptions(ctx context.Context, p Params, expected *
 	if strings.TrimSpace(expected.RouterOS) == "" {
 		return nil, fmt.Errorf("нет версии устройства; подключитесь заново")
 	}
-	snapshot := buildSnapshot(ctx, p.Protocol, read, p.Protocol == "api", options.IncludeHistory)
+	snapshot := buildSnapshotWithOptions(ctx, p.Protocol, read, p.Protocol == "api", options.IncludeHistory, options.IncludeTopology)
 	if options.IncludeLTE {
 		stopped := ctx.Err() != nil
 		if p.Protocol == "api" {

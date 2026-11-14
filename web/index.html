@@ -342,6 +342,8 @@
       <div class="card">
         <h2>Снимок каналов и маршрутов</h2>
         <div class="hint">Ручной сбор по API или REST: интерфейсы, IPv4-адреса, DHCP-клиенты, серверы и пулы, DHCP-сети, маршруты по умолчанию и доступные служебные записи failover. Настройки не изменяются. Данные читаются последовательно и могут измениться во время сбора; доступность интернета не проверяется. Через MAC-Telnet эта диагностика пока недоступна.</div>
+        <label class="checkbox"><input type="checkbox" id="snapshot-topology"> Добавить bridge, порты и VLAN (только чтение)</label>
+        <div class="hint">Дополнительно читаются bridge, bridge ports, bridge VLAN table и VLAN-интерфейсы. Набор полей зависит от RouterOS. Это не полная схема сети и не проверка конфликта VLAN; при ошибке API оставшиеся разделы могут не прочитаться. Данные содержат имена интерфейсов и VLAN.</div>
         <label class="checkbox"><input type="checkbox" id="snapshot-history"> Добавить в снимок краткую историю контроллера mti-failover</label>
         <div class="hint">По желанию читается журнал роутера; в отчёт попадают только распознанные события контроллера без текста сообщений и шлюзов. Время — как указано роутером, может быть без даты. Журнал может быть очищен, неполон или недоступен; по нему нельзя установить причину обрыва.</div>
         <label class="checkbox"><input type="checkbox" id="snapshot-lte"> Добавить разовое чтение показателей LTE/модема (RouterOS 7)</label>
@@ -1784,6 +1786,10 @@
       ["pools", "IPv4-пулы", ["name", "ranges", "next-pool"]],
       ["dhcpNetworks", "DHCP-сети", ["address", "gateway", "dns-server", "mti-owned"]]
     ];
+    if ((snapshot.sections || {}).bridges) sections.push(["bridges", "Bridge", ["name", "mtu", "protocol-mode", "vlan-filtering", "pvid", "igmp-snooping", "disabled", "running"]]);
+    if ((snapshot.sections || {}).bridgePorts) sections.push(["bridgePorts", "Порты bridge", ["interface", "bridge", "pvid", "frame-types", "ingress-filtering", "hw", "disabled", "inactive"]]);
+    if ((snapshot.sections || {}).bridgeVLANs) sections.push(["bridgeVLANs", "Таблица VLAN bridge", ["bridge", "vlan-ids", "tagged", "untagged", "current-tagged", "current-untagged", "dynamic", "disabled"]]);
+    if ((snapshot.sections || {}).vlanInterfaces) sections.push(["vlanInterfaces", "VLAN-интерфейсы", ["name", "interface", "vlan-id", "use-service-tag", "mtu", "disabled", "running"]]);
     if ((snapshot.sections || {}).lte) sections.push(["lte", "LTE: разовое чтение показателей", ["name", "running", "disabled", "monitor-status", "status", "registration-status", "data-class", "access-technology", "session-uptime", "rssi", "rsrp", "rsrq", "sinr", "cqi"]]);
     if ((snapshot.sections || {}).failoverHistory) sections.push(["failoverHistory", "История контроллера mti-failover (время роутера)", ["time", "event", "backup", "distance", "expected-distance", "replies", "routes", "dynamic-routes"]]);
     var lines = ["MikroTik Inspector — снимок каналов и маршрутов", version,
@@ -1817,6 +1823,7 @@
       });
       if (section.truncated) lines.push(spec[0] === "lte" ? "  Показаны первые 4 интерфейса." : spec[0] === "failoverHistory" ? "  Показаны последние 100 распознанных записей в порядке ответа роутера." : "  Показаны не все записи (лимит 500).");
     });
+    if ((snapshot.sections || {}).bridges || (snapshot.sections || {}).bridgePorts || (snapshot.sections || {}).bridgeVLANs || (snapshot.sections || {}).vlanInterfaces) lines.push("", "Bridge/VLAN: показаны только отдельные поля, доступные при чтении; — означает неизвестно. Значения настроек и текущего состояния могут различаться. Это не полная топология или проверка доставки трафика и конфликтов VLAN.");
     if ((snapshot.sections || {}).lte) lines.push("", "LTE monitor-status: ok — ответ получен, unavailable — нет ответа или команда недоступна, skipped — не запрашивалось. Пустые поля неизвестны, не равны нулю и не доказывают неисправность. Одно измерение не доказывает наличие интернета, причину обрыва или режим телефона.");
     if ((snapshot.sections || {}).failoverHistory) lines.push("", "История распознаёт только известные сообщения mti-failover, а не весь журнал. Время задано роутером, дата или часовой пояс могут отсутствовать. Пустой результат не доказывает отсутствие событий; запись контроллера не подтверждает путь трафика или причину неисправности.");
     lines.push("", "Переменные скрипта могут отсутствовать или быть устаревшими; наличие записи не доказывает работу контроллера. Маршрутизация зависит и от других правил/таблиц. Снимок не проверяет полные настройки DNS, все конфликты или безопасность применения. mti-owned=— означает неизвестно.");
@@ -1831,7 +1838,7 @@
     btn.disabled = true; btn.textContent = "Собираем…";
     $("snapshot-output").textContent = "Чтение данных…";
     function current() { return seq === snapshotSeq && lastInfo === device && connectedKey === key && connectionKey() === key; }
-    fetch("/api/network-snapshot", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({conn:conn, device:device, includeHistory:$("snapshot-history").checked, includeLTE:$("snapshot-lte").checked})})
+    fetch("/api/network-snapshot", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({conn:conn, device:device, includeHistory:$("snapshot-history").checked, includeLTE:$("snapshot-lte").checked, includeTopology:$("snapshot-topology").checked})})
       .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
       .then(function (data) {
         if (!current()) return;
@@ -1843,6 +1850,7 @@
       .catch(function (e) { if (current()) $("snapshot-output").textContent = "Ошибка: " + (e.message || "не удалось собрать снимок"); })
       .finally(function () { if (current()) { btn.disabled = false; btn.textContent = "Собрать снимок"; } });
   });
+  $("snapshot-topology").addEventListener("change", clearNetworkSnapshot);
   $("snapshot-history").addEventListener("change", clearNetworkSnapshot);
   $("snapshot-lte").addEventListener("change", clearNetworkSnapshot);
 
@@ -1863,7 +1871,8 @@
 
   // Snapshot comparison is local: input files never leave the browser.
   var snapshotCompareSeq = 0, snapshotCompareText = "";
-  var snapshotCompareTitles = ["Интерфейсы", "IPv4-адреса", "DHCP-клиенты", "Маршруты по умолчанию и mti-probe-link", "Планировщик mti-failover", "Доступные переменные mti-failover", "DHCP-серверы", "IPv4-пулы", "DHCP-сети", "LTE: разовое чтение показателей", "История контроллера mti-failover (время роутера)"];
+  var snapshotCompareTitles = ["Интерфейсы", "IPv4-адреса", "DHCP-клиенты", "Маршруты по умолчанию и mti-probe-link", "Планировщик mti-failover", "Доступные переменные mti-failover", "DHCP-серверы", "IPv4-пулы", "DHCP-сети", "LTE: разовое чтение показателей", "История контроллера mti-failover (время роутера)", "Bridge", "Порты bridge", "Таблица VLAN bridge", "VLAN-интерфейсы"];
+  var snapshotCompareOptional = ["LTE: разовое чтение показателей", "История контроллера mti-failover (время роутера)", "Bridge", "Порты bridge", "Таблица VLAN bridge", "VLAN-интерфейсы"];
 
   function parseSnapshotReport(text) {
     var lines = text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n");
@@ -1906,7 +1915,7 @@
     }
     snapshotCompareTitles.forEach(function (title) {
       var x = a[title], y = b[title];
-      if (!x && !y && snapshotCompareTitles.indexOf(title) >= 9) return; // Optional sections.
+      if (!x && !y && snapshotCompareOptional.indexOf(title) !== -1) return;
       lines.push("", title + ":");
       if (!x || !y) { lines.push("  Нет раздела " + (!x && !y ? "в обоих снимках" : !x ? "в первом снимке" : "во втором снимке") + "; сравнение невозможно."); incomplete++; return; }
       if (x.error || y.error || x.truncated || y.truncated || x.invalid || y.invalid) {

@@ -220,10 +220,11 @@ func handleNetworkSnapshot(ver string) http.HandlerFunc {
 			return
 		}
 		var req struct {
-			Conn           mikrotik.Params `json:"conn"`
-			Device         *mikrotik.Info  `json:"device"`
-			IncludeHistory bool            `json:"includeHistory"`
-			IncludeLTE     bool            `json:"includeLTE"`
+			Conn            mikrotik.Params `json:"conn"`
+			Device          *mikrotik.Info  `json:"device"`
+			IncludeHistory  bool            `json:"includeHistory"`
+			IncludeLTE      bool            `json:"includeLTE"`
+			IncludeTopology bool            `json:"includeTopology"`
 		}
 		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, apiResponse{OK: false, Error: "некорректный запрос"})
@@ -231,7 +232,7 @@ func handleNetworkSnapshot(ver string) http.HandlerFunc {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
-		snapshot, err := mikrotik.CollectNetworkSnapshotWithOptions(ctx, req.Conn, req.Device, mikrotik.NetworkSnapshotOptions{IncludeHistory: req.IncludeHistory, IncludeLTE: req.IncludeLTE})
+		snapshot, err := mikrotik.CollectNetworkSnapshotWithOptions(ctx, req.Conn, req.Device, mikrotik.NetworkSnapshotOptions{IncludeHistory: req.IncludeHistory, IncludeLTE: req.IncludeLTE, IncludeTopology: req.IncludeTopology})
 		if err != nil {
 			writeJSON(w, http.StatusOK, apiResponse{OK: false, Error: err.Error(), Version: ver})
 			return
