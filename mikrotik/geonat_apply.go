@@ -26,7 +26,7 @@ type GeoApplyRequest struct {
 
 // Request the status explicitly: some RouterOS print responses omit flag
 // properties unless they are requested. Missing values remain unknown.
-const geoNATProperties = "chain,action,disabled,invalid,protocol,to-addresses,to-ports,dst-port,in-interface,in-interface-list"
+const geoNATProperties = ".id,chain,action,disabled,invalid,protocol,to-addresses,to-ports,dst-port,in-interface,in-interface-list"
 
 func geoAPIReader(c *apiClient) snapshotReader {
 	return func(path string) ([]map[string]string, error) {
@@ -34,12 +34,97 @@ func geoAPIReader(c *apiClient) snapshotReader {
 		var err error
 		if path == "/ip/firewall/nat" {
 			rows, _, err = c.exec(path+"/print", "=.proplist="+geoNATProperties)
+			if err == nil {
+				geoRecoverAPIStatuses(c, rows)
+			}
 		} else {
 			rows, _, err = c.exec(path + "/print")
 		}
 		return rows, err
 	}
 }
+
+// When print omits disabled, try two mutually exclusive RouterOS queries.
+// A missing value is never interpreted as false. Only a complete, disjoint
+// partition of the exact original IDs can establish the state. Queries are
+// read-only and remain in the same API session as the preflight/apply.
+func geoRecoverAPIStatuses(c *apiClient, rows []map[string]string) {
+	needs := false
+	for _, row := range rows {
+		if row["disabled"] == "" {
+			needs = true
+			break
+		}
+	}
+	if !needs || len(rows) == 0 {
+		return
+	}
+	original := make(map[string]map[string]string, len(rows))
+	for _, row := range rows {
+		id := row[".id"]
+		if !validGeoNATID(id) || original[id] != nil {
+			return
+		}
+		original[id] = row
+	}
+	enabled, _, err := c.exec("/ip/firewall/nat/print", "=.proplist=.id,disabled", "?disabled=false")
+	if err != nil {
+		return
+	}
+	disabled, _, err := c.exec("/ip/firewall/nat/print", "=.proplist=.id,disabled", "?disabled=true")
+	if err != nil {
+		return
+	}
+	status := make(map[string]bool, len(rows))
+	for _, group := range []struct {
+		rows     []map[string]string
+		disabled bool
+	}{{enabled, false}, {disabled, true}} {
+		for _, row := range group.rows {
+			id := row[".id"]
+			originalRow, exists := original[id]
+			if !exists {
+				return
+			}
+			if _, duplicate := status[id]; duplicate {
+				return
+			}
+			v := row["disabled"]
+			if v != "" && ((!group.disabled && !geoFalse(v)) || (group.disabled && !geoTrue(v))) {
+				return
+			}
+			prev := originalRow["disabled"]
+			if prev != "" && ((!group.disabled && !geoFalse(prev)) || (group.disabled && !geoTrue(prev))) {
+				return
+			}
+			status[id] = group.disabled
+		}
+	}
+	if len(status) != len(original) {
+		return
+	}
+	for id, row := range original {
+		if row["disabled"] == "" {
+			if status[id] {
+				row["disabled"] = "true"
+			} else {
+				row["disabled"] = "false"
+			}
+		}
+	}
+}
+func validGeoNATID(id string) bool {
+	if len(id) < 2 || len(id) > 17 || id[0] != '*' {
+		return false
+	}
+	for _, c := range id[1:] {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+			return false
+		}
+	}
+	return true
+}
+
 func geoRESTReader(ctx context.Context, rc *restClient) snapshotReader {
 	return func(path string) ([]map[string]string, error) {
 		query := ""

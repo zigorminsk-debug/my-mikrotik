@@ -271,6 +271,10 @@ func TestGeoNATAPISameSessionNoRetry(t *testing.T) {
 		{"success", true, false, 3, "false", false}, {"no-nat", false, false, 0, "", false}, {"run-error", true, true, 3, "false", false},
 		{"disabled", true, false, 0, "true", false}, {"unknown", true, false, 0, "", false},
 		{"read-only", true, false, 0, "false", true}, {"override-unknown", true, false, 3, "", false}, {"override-disabled", true, false, 0, "true", false},
+		{"auto-enabled", true, false, 3, "", false}, {"auto-disabled", true, false, 0, "", false},
+		{"auto-missing", true, false, 0, "", false}, {"auto-ambiguous", true, false, 0, "", false},
+		{"auto-unrelated", true, false, 0, "", false}, {"auto-trap", true, false, 0, "", false},
+		{"auto-check", true, false, 0, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -312,6 +316,27 @@ func TestGeoNATAPISameSessionNoRetry(t *testing.T) {
 					case "/ip/firewall/filter/print":
 						_ = writeSentence(conn, "!done")
 					case "/ip/firewall/nat/print":
+						if len(words) == 3 && strings.HasPrefix(tc.name, "auto-") {
+							if words[1] != "=.proplist=.id,disabled" || (words[2] != "?disabled=false" && words[2] != "?disabled=true") {
+								t.Errorf("bad status query: %v", words)
+								_ = writeSentence(conn, "!trap", "=message=bad query")
+								_ = writeSentence(conn, "!done")
+								continue
+							}
+							if tc.name == "auto-trap" {
+								_ = writeSentence(conn, "!trap", "=message=unsupported")
+								_ = writeSentence(conn, "!done")
+								continue
+							}
+							if (words[2] == "?disabled=false" && (tc.name == "auto-enabled" || tc.name == "auto-check" || tc.name == "auto-ambiguous")) || (words[2] == "?disabled=true" && (tc.name == "auto-disabled" || tc.name == "auto-ambiguous")) {
+								_ = writeSentence(conn, "!re", "=.id=*A")
+							}
+							if tc.name == "auto-unrelated" && words[2] == "?disabled=false" {
+								_ = writeSentence(conn, "!re", "=.id=*B")
+							}
+							_ = writeSentence(conn, "!done")
+							continue
+						}
 						if len(words) != 2 || words[1] != "=.proplist="+geoNATProperties {
 							t.Errorf("missing NAT proplist: %v", words)
 							_ = writeSentence(conn, "!trap", "=message=missing properties")
@@ -322,6 +347,9 @@ func TestGeoNATAPISameSessionNoRetry(t *testing.T) {
 							fields := []string{"!re", "=chain=dstnat", "=action=dst-nat", "=protocol=6", "=to-addresses=192.168.88.50", "=to-ports=3389", "=in-interface=ether1"}
 							if tc.disabled != "" {
 								fields = append(fields, "=disabled="+tc.disabled)
+							}
+							if strings.HasPrefix(tc.name, "auto-") {
+								fields = append(fields, "=.id=*A")
 							}
 							_ = writeSentence(conn, fields...)
 						}
@@ -355,7 +383,7 @@ func TestGeoNATAPISameSessionNoRetry(t *testing.T) {
 			} else {
 				var proto string
 				proto, err = ApplyGeoNAT(context.Background(), req)
-				if tc.nat && (tc.disabled == "false" || tc.disabled == "" && req.AllowUnknownNATStatus) && !tc.runError {
+				if tc.nat && (tc.disabled == "false" || tc.disabled == "" && req.AllowUnknownNATStatus || tc.name == "auto-enabled") && !tc.runError {
 					if err != nil || proto != "api" {
 						t.Fatalf("%s %v", proto, err)
 					}
@@ -447,5 +475,77 @@ func TestGeoNATUnknownProtocolConflictsAndDiagnostics(t *testing.T) {
 	d["/ip/firewall/nat"][0]["protocol"] = "PRIVATE"
 	if err := checkGeoNAT(g, read); err == nil || !strings.Contains(err.Error(), "неизвестный формат protocol") || strings.Contains(err.Error(), "PRIVATE") {
 		t.Fatalf("diagnostic: %v", err)
+	}
+}
+
+func TestGeoNATAPIStatusPartition(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		original          []map[string]string
+		enabled, disabled []map[string]string
+		want              []string
+		calls             int
+	}{
+		{"complete", []map[string]string{{".id": "*1"}, {".id": "*2"}}, []map[string]string{{".id": "*1"}}, []map[string]string{{".id": "*2"}}, []string{"false", "true"}, 2},
+		{"partial", []map[string]string{{".id": "*1"}, {".id": "*2"}}, []map[string]string{{".id": "*1"}}, nil, []string{"", ""}, 2},
+		{"duplicate", []map[string]string{{".id": "*1"}}, []map[string]string{{".id": "*1"}, {".id": "*1"}}, nil, []string{""}, 2},
+		{"both", []map[string]string{{".id": "*1"}}, []map[string]string{{".id": "*1"}}, []map[string]string{{".id": "*1"}}, []string{""}, 2},
+		{"wrong-status", []map[string]string{{".id": "*1"}}, []map[string]string{{".id": "*1", "disabled": "true"}}, nil, []string{""}, 2},
+		{"contradiction", []map[string]string{{".id": "*1"}, {".id": "*2", "disabled": "true"}}, []map[string]string{{".id": "*1"}, {".id": "*2"}}, nil, []string{"", "true"}, 2},
+		{"missing-id", []map[string]string{{}}, nil, nil, []string{""}, 0},
+		{"duplicate-original", []map[string]string{{".id": "*1"}, {".id": "*1"}}, nil, nil, []string{"", ""}, 0},
+		{"untrusted-id", []map[string]string{{".id": "*1\n?disabled=false"}}, nil, nil, []string{""}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, server := net.Pipe()
+			defer client.Close()
+			done := make(chan int, 1)
+			go func() {
+				defer server.Close()
+				count := 0
+				defer func() { done <- count }()
+				for {
+					words, err := readSentence(server)
+					if err != nil {
+						return
+					}
+					count++
+					if len(words) != 3 || words[0] != "/ip/firewall/nat/print" || words[1] != "=.proplist=.id,disabled" {
+						t.Errorf("unexpected %v", words)
+						return
+					}
+					var rows []map[string]string
+					switch words[2] {
+					case "?disabled=false":
+						rows = tc.enabled
+					case "?disabled=true":
+						rows = tc.disabled
+					default:
+						t.Errorf("query %v", words)
+						return
+					}
+					for _, row := range rows {
+						reply := []string{"!re"}
+						for k, v := range row {
+							reply = append(reply, "="+k+"="+v)
+						}
+						_ = writeSentence(server, reply...)
+					}
+					_ = writeSentence(server, "!done")
+				}
+			}()
+			c := &apiClient{conn: client, ctx: context.Background()}
+			geoRecoverAPIStatuses(c, tc.original)
+			_ = client.Close()
+			calls := <-done
+			if calls != tc.calls {
+				t.Fatalf("calls %d", calls)
+			}
+			for i, row := range tc.original {
+				if row["disabled"] != tc.want[i] {
+					t.Fatalf("row %d = %q want %q", i, row["disabled"], tc.want[i])
+				}
+			}
+		})
 	}
 }
