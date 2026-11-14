@@ -18,7 +18,7 @@ function setup() {
     currentScript:':put 1', connectedKey:'key', lastInfo:{protocol:'api',routeros:'7.25.1'}, interfacesReady:true, previewSeq:1, previewTimer:null,
     connectionKey:()=> 'key', connPayload:()=>({host:'192.0.2.1'}),
     setScriptState:s=>{state=s}, protoLabel:p=>p, window:{confirm:()=>true},
-    clearTimeout(){}, setTimeout(){return 1}, preview(){}, clearLiveLANPlan(){}, invalidateConnection(){throw Error('invalidated')},
+    clearTimeout(){}, setTimeout(){return 1}, preview(){}, clearLiveLANPlan(){}, clearGeoCheck(){}, invalidateConnection(){throw Error('invalidated')},
     fetch:(url,opts)=>{ requests++; lastRequest={url,body:JSON.parse(opts.body)}; return new Promise(resolve=>{resolveFetch=resolve}); },
   });
   vm.runInContext(between('  function geoApplyIssue()', '  // ------------------------------------------------------------------\n  // предпросмотр'),ctx);
@@ -58,6 +58,15 @@ const settle=()=>new Promise(r=>setImmediate(r));
   guarded.ctx.currentScript='# MTI-GEONAT-GUARDED-APPLY'+'x'.repeat(65537); guarded.ctx.setActions(true); assert.equal(guarded.el['btn-apply'].disabled,true);
   assert.match(guarded.el['apply-reason'].textContent,/64 КиБ/);
   guarded.ctx.currentScript='# MTI-GEONAT-GUARDED-APPLY'; guarded.ctx.lastInfo.protocol='mac'; guarded.ctx.setActions(true); assert.equal(guarded.el['btn-apply'].disabled,true);
+
+  for (const [stage, safe] of [['preflight', true], ['unknown', false], [undefined, false]]) {
+    const f=setup(); f.selectGeo(); f.ctx.currentScript='# MTI-GEONAT-GUARDED-APPLY';
+    f.ctx.currentGeoPreview={device:f.ctx.lastInfo,interfaces:[],geoNat:{destination:'192.168.88.50',port:'3389',wan:'ether1'},generatedAt:'2026-11-13T00:00:00Z'};
+    f.el['btn-apply'].handler.call(f.el['btn-apply']); f.resolve({json:()=>Promise.resolve({ok:false,error:'not found',stage})});
+    await settle(); await settle();
+    assert.equal(/настройки этим запросом не изменены/.test(f.el['build-error'].textContent),safe);
+    assert.equal(/могли примениться частично/.test(f.el['build-error'].textContent),!safe);
+  }
 
   const radius=setup(); radius.selectRadius(); radius.ctx.currentScript='# MTI-PPP-RADIUS-GUARDED-APPLY\n:put 1';
   radius.ctx.currentRadiusPreview={device:radius.ctx.lastInfo,interfaces:[],pppRadius:{address:'192.0.2.10',secret:'private'},generatedAt:'2026-11-13T00:00:00Z'};

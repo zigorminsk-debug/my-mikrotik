@@ -9,7 +9,7 @@ class Reader{readAsText(f){this.file=f;pending.push(this)}finish(){this.result=t
 const ctx=vm.createContext({$:id=>el[id],FileReader:Reader,Promise,Map,Set,Blob,URL,document:{},setTimeout,copyText:()=>Promise.resolve(),flash(){},showError(){},fetch(){calls++;throw Error('network forbidden')}});
 vm.runInContext(part('  var snapshotCompareSeq = 0','  function compareSnapshotReports('),ctx);
 vm.runInContext(part('  function readComparisonFile(', '  ["compare-before", "compare-after"]'),ctx);
-vm.runInContext(part('  // Offline advisory only;', '  // A separate LAN plan'),ctx);
+vm.runInContext(part('  // Offline advisory only;', '  // A separate read-only check'),ctx);
 const form=vm.createContext({protoLabel:x=>x});vm.runInContext(part('  function formatNetworkSnapshot(', '  $("snapshot-run").addEventListener'),form);
 const ok=rows=>({status:'ok',rows});
 const snapshot={protocol:'api',sections:{

@@ -9,6 +9,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -83,6 +84,7 @@ func NewMux(opt Options) http.Handler {
 	mux.HandleFunc("/api/geo/prefixes", handleGeoPrefixes)
 	mux.HandleFunc("/api/apply", handleApply(ver))
 	mux.HandleFunc("/api/geonat/apply", handleGeoNATApply(ver))
+	mux.HandleFunc("/api/geonat/check", handleGeoNATCheck(ver))
 	mux.HandleFunc("/api/ppp-radius/apply", handlePPPRadiusApply(ver))
 	mux.HandleFunc("/api/lan/plan", handleLAN(ver, false))
 	mux.HandleFunc("/api/lan/apply", handleLAN(ver, true))
@@ -320,7 +322,17 @@ func handleGeoNATApply(ver string) http.HandlerFunc {
 		defer cancel()
 		proto, err := mikrotik.ApplyGeoNAT(ctx, req)
 		if err != nil {
-			writeJSON(w, http.StatusOK, apiResponse{OK: false, Error: err.Error(), Version: ver})
+			stage := "unknown"
+			var preflight *mikrotik.GeoPreflightError
+			if errors.As(err, &preflight) {
+				stage = "preflight"
+			}
+			writeJSON(w, http.StatusOK, struct {
+				OK      bool   `json:"ok"`
+				Error   string `json:"error"`
+				Stage   string `json:"stage"`
+				Version string `json:"version,omitempty"`
+			}{false, err.Error(), stage, ver})
 			return
 		}
 		writeJSON(w, http.StatusOK, struct {
@@ -329,6 +341,39 @@ func handleGeoNATApply(ver string) http.HandlerFunc {
 			Script   string `json:"script"`
 			Version  string `json:"version,omitempty"`
 		}{true, proto, mikrotik.ScriptName(), ver})
+	}
+}
+
+// Read-only diagnostic for the exact same NAT checks used during apply.
+func handleGeoNATCheck(ver string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
+			return
+		}
+		var req mikrotik.GeoApplyRequest
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, apiResponse{OK: false, Error: "некорректный запрос"})
+			return
+		}
+		if !applyGate.TryLock() {
+			writeJSON(w, http.StatusOK, apiResponse{OK: false, Error: "другое применение ещё выполняется", Version: ver})
+			return
+		}
+		defer applyGate.Unlock()
+		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		defer cancel()
+		matched, message, err := mikrotik.DiagnoseGeoNAT(ctx, req)
+		if err != nil {
+			writeJSON(w, http.StatusOK, apiResponse{OK: false, Error: err.Error(), Version: ver})
+			return
+		}
+		writeJSON(w, http.StatusOK, struct {
+			OK      bool   `json:"ok"`
+			Matched bool   `json:"matched"`
+			Message string `json:"message"`
+			Version string `json:"version,omitempty"`
+		}{true, matched, message, ver})
 	}
 }
 

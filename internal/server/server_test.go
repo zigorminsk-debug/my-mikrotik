@@ -414,6 +414,7 @@ func TestNetworkSnapshotOverHTTP(t *testing.T) {
 func TestGeoNATApplyHTTPPreviewAndGuard(t *testing.T) {
 	var requests []string
 	var saved string
+	var failRun bool
 	router := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
 		switch r.Method + " " + r.URL.Path {
@@ -431,7 +432,12 @@ func TestGeoNATApplyHTTPPreviewAndGuard(t *testing.T) {
 			fmt.Fprint(w, `[{"chain":"dstnat","action":"dst-nat","disabled":false,"protocol":"tcp","to-addresses":"192.168.88.5","to-ports":"3389","in-interface":"ether1"}]`)
 		case "GET /rest/system/script":
 			fmt.Fprint(w, `[]`)
-		case "POST /rest/system/script/remove", "POST /rest/system/script/run":
+		case "POST /rest/system/script/remove":
+			fmt.Fprint(w, `{}`)
+		case "POST /rest/system/script/run":
+			if failRun {
+				w.WriteHeader(http.StatusInternalServerError)
+			}
 			fmt.Fprint(w, `{}`)
 		case "PUT /rest/system/script":
 			var body struct {
@@ -477,16 +483,41 @@ func TestGeoNATApplyHTTPPreviewAndGuard(t *testing.T) {
 	var out struct {
 		OK    bool   `json:"ok"`
 		Error string `json:"error"`
+		Stage string `json:"stage"`
+	}
+	var check struct {
+		OK      bool   `json:"ok"`
+		Matched bool   `json:"matched"`
+		Message string `json:"message"`
+	}
+	post("/api/geonat/check", req, &check)
+	if !check.OK || !check.Matched {
+		t.Fatalf("check: %+v", check)
+	}
+	for _, c := range requests {
+		if !strings.HasPrefix(c, "GET ") {
+			t.Fatalf("check wrote: %v", requests)
+		}
 	}
 	post("/api/geonat/apply", req, &out)
 	if !out.OK || saved != preview.Script {
 		t.Fatalf("apply=%+v, script match=%t; requests=%v", out, saved == preview.Script, requests)
 	}
+	failRun = true
+	out = struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+		Stage string `json:"stage"`
+	}{}
+	post("/api/geonat/apply", req, &out)
+	if out.OK || out.Stage != "unknown" || !strings.Contains(out.Error, "частично") {
+		t.Fatalf("run error: %+v", out)
+	}
 	before := len(requests)
 	req.Script += "\n:put 1"
 	out.OK = false
 	post("/api/geonat/apply", req, &out)
-	if out.OK || !strings.Contains(out.Error, "предпросмотр") || len(requests) != before {
+	if out.OK || out.Stage != "preflight" || !strings.Contains(out.Error, "предпросмотр") || len(requests) != before {
 		t.Fatalf("changed preview not blocked: %+v %v", out, requests[before:])
 	}
 }

@@ -608,6 +608,8 @@
                 <div id="geo-country-list" style="max-height:180px;overflow:auto;border:1px solid #cbd5e1;padding:8px" aria-label="Выбор стран"></div>
                 <div class="actions"><button type="button" class="ghost" id="geo-load">Загрузить IP выбранных стран</button></div>
                 <div id="geo-status" class="sec-note">Страны можно не выбирать, если указаны отдельные адреса.</div>
+                <div class="actions"><button type="button" class="ghost" id="geo-check">Проверить существующий dst-nat (без изменений)</button></div>
+                <div id="geo-check-output" class="sec-note" aria-live="polite"></div>
                 <label class="checkbox"><input type="checkbox" id="geo-ack"> Я проверил ресурс, WAN-интерфейс и сохранил резервную копию</label>
                 <div class="sec-note">Выключите другие разделы: это отдельный скрипт для одного существующего dst-nat, он не создаёт проброс. Правила затрагивают только выбранный WAN, внутренний IPv4, порт и протокол; их accept имеет приоритет над существующими правилами. Все пробросы на этот внутренний адрес и порт через выбранный WAN попадут под правило, независимо от внешнего порта. IPv6, непроброшенные соединения и другие WAN не защищены. Уже работающие FastTrack-соединения могут сохраняться до очистки conntrack. Для каждого другого ресурса используйте отдельный идентификатор. Страны определяются по RIR-делегированию адресов: геолокация приблизительная, VPN/proxy её обходят. Обновляйте список вручную (кэш данных — 12 часов). Кнопка «Применить» проверяет устройство и наличие подходящего dst-nat перед изменением правил; она доступна для RouterOS 7 по API/REST при размере скрипта до 64 КиБ. Проверка не доказывает достижимость сервиса и не обеспечивает автоматический откат. Для MAC и больших скриптов доступен .rsc. Safe Mode не рассчитан на тысячи изменений.</div>
               </div>
@@ -769,6 +771,7 @@
   var snapshotSeq = 0;
   var snapshotText = "";
   var lanLiveSeq = 0, lanLivePlan = null, lanLiveBusy = false;
+  var geoCheckSeq = 0;
 
   var LABELS = [
     ["identity", "Идентификатор"],
@@ -903,6 +906,7 @@
     if (!lastInfo && connectedKey === null) return;
     if (force !== true && connectedKey !== null && connectedKey === connectionKey()) return;
     connectedKey = null;
+    clearGeoCheck();
     clearLiveLANPlan();
     clearNetworkSnapshot();
     $("build-ok").style.display = "none"; $("build-ok").textContent = "";
@@ -1359,6 +1363,7 @@
   // предпросмотр скрипта
   // ------------------------------------------------------------------
   function schedulePreview() {
+    clearGeoCheck();
     clearLiveLANPlan();
     clearTimeout(previewTimer);
     previewSeq++; // сразу делаем предыдущий результат недействительным
@@ -1583,6 +1588,7 @@
   // подключение и загрузка данных
   // ------------------------------------------------------------------
   function loadInterfaces() {
+    clearGeoCheck();
     clearLiveLANPlan();
     var device = lastInfo;
     var key = connectedKey;
@@ -1655,6 +1661,7 @@
     var btn = $("go");
     if (btn.disabled) return;
     // Старый скрипт не должен применяться к другому устройству после неудачного входа.
+    clearGeoCheck();
     clearLiveLANPlan();
     $("build-ok").style.display = "none"; $("build-ok").textContent = "";
     clearNetworkSnapshot();
@@ -2150,6 +2157,7 @@
     );
     var ok = window.confirm(prompt);
     if (!ok) return;
+    if (geo) clearGeoCheck();
 
     var btn = this;
     var applySeq = previewSeq, applyKey = connectedKey, applyDevice = lastInfo, applySource = currentScript, applyGeo = currentGeoPreview, applyRadius = currentRadiusPreview;
@@ -2174,7 +2182,7 @@
     })
       .then(function (r) { return r.json(); })
       .then(function (res) {
-        if (!res.ok) throw new Error(res.error || "не удалось применить настройки");
+        if (!res.ok) { var failure = new Error(res.error || "не удалось применить настройки"); failure.geoPreflight = geo && res.stage === "preflight"; throw failure; }
         okBox.style.display = "block";
         if (!currentApply()) {
           okBox.textContent = "Ранее запущенный скрипт на " + host + " завершился без ошибки. Это сообщение относится к прежним настройкам, а не к текущему предпросмотру. Проверьте роутер перед повторными действиями.";
@@ -2202,7 +2210,7 @@
       .catch(function (e) {
         errBox.style.display = "block";
         errBox.textContent = "Применение скрипта на " + host + " не удалось: " + (e.message || e) +
-          "\nНастройки могли примениться частично. Не запускайте скрипт повторно, пока не проверите состояние роутера и причину ошибки." +
+          (e.geoPreflight ? "\nПроверка остановилась до отправки скрипта; настройки этим запросом не изменены." : "\nНастройки могли примениться частично. Не запускайте скрипт повторно, пока не проверите состояние роутера и причину ошибки.") +
           (currentApply() ? "" : " Это сообщение относится к предыдущему запросу, не к текущему предпросмотру.");
         if (currentApply()) setScriptState("ошибка применения", "bad");
       })
@@ -2454,6 +2462,23 @@
     if (!lanCheckText) return; var a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([lanCheckText], {type:"text/plain;charset=utf-8"})); a.download = "mikrotik-lan-snapshot-check.txt";
     document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 0); flash(this, "Файл сохранён ✓");
+  });
+
+  // A separate read-only check; no script is sent or executed.
+  function clearGeoCheck() { geoCheckSeq++; $("geo-check-output").textContent = ""; }
+  function currentGeoCheckParams() { return {enabled:chk("chk-geoNat"),resource:val("geo-id"),wan:val("geo-wan"),destination:val("geo-destination"),port:val("geo-port"),protocol:val("geo-protocol")}; }
+  $("geo-check").addEventListener("click", function () {
+    if (this.disabled || applyInProgress) return;
+    if (!lastInfo || !interfacesReady || connectedKey !== connectionKey()) { $("geo-check-output").textContent = "Сначала подключитесь к устройству."; return; }
+    if (lastInfo.protocol !== "api" && lastInfo.protocol !== "rest") { $("geo-check-output").textContent = "Проверка доступна по API/REST."; return; }
+    var geo = currentGeoCheckParams(); if (!geo.enabled) { $("geo-check-output").textContent = "Включите белый список и заполните параметры."; return; }
+    var seq=++geoCheckSeq, device=lastInfo, key=connectedKey, geoKey=JSON.stringify(geo), btn=this, conn=connPayload(); conn.protocol=device.protocol;
+    btn.disabled=true; $("geo-check-output").textContent="Проверяем правило только чтением…";
+    function current() { return seq===geoCheckSeq && lastInfo===device && connectedKey===key && connectionKey()===key && interfacesReady && JSON.stringify(currentGeoCheckParams())===geoKey; }
+    fetch("/api/geonat/check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({conn:conn,device:device,geoNat:geo})})
+      .then(function(r){return r.json();}).then(function(res){ if (!current()) return; if (!res.ok) throw new Error(res.error || "не удалось проверить"); $("geo-check-output").textContent=res.message || "Нет результата проверки."; })
+      .catch(function(e){if(current()) $("geo-check-output").textContent="Проверка не выполнена: " + (e.message || "ошибка связи") + ". Настройки не изменены.";})
+      .finally(function(){btn.disabled=false;});
   });
 
   // A separate LAN plan is bound to the connection and form generation.

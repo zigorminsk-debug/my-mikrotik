@@ -21,10 +21,22 @@ type GeoApplyRequest struct {
 	Script      string         `json:"script"`
 }
 
+// GeoPreflightError guarantees that no configuration write was attempted by this request.
+type GeoPreflightError struct{ Cause error }
+
+func (e *GeoPreflightError) Error() string { return e.Cause.Error() }
+func (e *GeoPreflightError) Unwrap() error { return e.Cause }
+
 // ApplyGeoNAT accepts only an exact GeoNAT-only preview and performs read-only
 // preflight on the chosen transport before any writes. It never falls back or
 // retries after an attempt; a failed request may have partially modified RouterOS.
-func ApplyGeoNAT(ctx context.Context, req GeoApplyRequest) (string, error) {
+func ApplyGeoNAT(ctx context.Context, req GeoApplyRequest) (protocol string, err error) {
+	attempted := false
+	defer func() {
+		if err != nil && !attempted {
+			err = &GeoPreflightError{Cause: err}
+		}
+	}()
 	p := req.Conn
 	if err := p.normalize(); err != nil {
 		return "", err
@@ -108,6 +120,7 @@ func ApplyGeoNAT(ctx context.Context, req GeoApplyRequest) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("проверка прервана до применения")
 	}
+	attempted = true
 	if err := run(); err != nil {
 		return "", fmt.Errorf("применение не завершилось: настройки могли измениться частично; не повторяйте без проверки: %w", err)
 	}
@@ -151,8 +164,59 @@ func geoPortMayOverlap(value, port string) bool {
 	if value == "" {
 		return true
 	}
-	if n, err := strconv.Atoi(value); err == nil {
-		return strconv.Itoa(n) == port
+	if n, err := strconv.Atoi(value); err == nil && n > 0 && n <= 65535 {
+		wanted, err := strconv.Atoi(port)
+		return err != nil || wanted < 1 || wanted > 65535 || n == wanted
+	}
+	return true
+}
+
+// RouterOS may encode TCP/UDP as protocol names or IANA numbers.
+func geoProtocol(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "tcp", "6":
+		return "tcp"
+	case "udp", "17":
+		return "udp"
+	}
+	return ""
+}
+func geoProtocolMayOverlap(value, expected string) bool {
+	p := geoProtocol(value)
+	return p == "" || p == expected
+}
+func geoFalse(v string) bool { return explicitlyFalse(v) || v == "0" }
+func geoTrue(v string) bool  { return explicitlyTrue(v) || v == "1" }
+func geoSinglePort(value, expected string) bool {
+	parts := strings.Split(strings.TrimSpace(value), "-")
+	if len(parts) < 1 || len(parts) > 2 {
+		return false
+	}
+	n, err := strconv.Atoi(parts[0])
+	if err != nil || n < 1 || n > 65535 {
+		return false
+	}
+	if len(parts) == 2 {
+		end, err := strconv.Atoi(parts[1])
+		if err != nil || end != n {
+			return false
+		}
+	}
+	want, err := strconv.Atoi(expected)
+	return err == nil && want == n
+}
+func geoSingleAddress(value string, target net.IP) bool {
+	parts := strings.Split(strings.TrimSpace(value), "-")
+	if len(parts) < 1 || len(parts) > 2 {
+		return false
+	}
+	ip := net.ParseIP(parts[0])
+	if ip == nil || ip.To4() == nil || !ip.Equal(target) {
+		return false
+	}
+	if len(parts) == 2 {
+		other := net.ParseIP(parts[1])
+		return other != nil && other.Equal(ip)
 	}
 	return true
 }
@@ -170,7 +234,7 @@ func checkGeoNAT(s GeoNATSettings, read snapshotReader) error {
 	}
 	matches := 0
 	for _, i := range ifs {
-		if i["name"] == s.WAN && explicitlyFalse(i["disabled"]) {
+		if i["name"] == s.WAN && geoFalse(i["disabled"]) {
 			matches++
 		}
 	}
@@ -212,13 +276,13 @@ func checkGeoNAT(s GeoNATSettings, read snapshotReader) error {
 		overlaps := (f["chain"] == "" || f["chain"] == "forward") &&
 			(f["in-interface"] == "" || f["in-interface"] == s.WAN) &&
 			geoIPMayOverlap(f["dst-address"], s.Destination) &&
-			(f["protocol"] == "" || f["protocol"] == s.Protocol) &&
+			geoProtocolMayOverlap(f["protocol"], s.Protocol) &&
 			geoPortMayOverlap(f["dst-port"], s.Port)
 		if !own && overlaps {
 			return fmt.Errorf("обнаружен конфликт другого служебного белого списка; проверьте правила firewall вручную")
 		}
 		if own {
-			if !overlaps || !explicitlyFalse(f["disabled"]) || f["chain"] != "forward" || f["in-interface"] != s.WAN || (f["dst-address"] != s.Destination && f["dst-address"] != s.Destination+"/32") || f["protocol"] != s.Protocol || f["dst-port"] != s.Port {
+			if !overlaps || !geoFalse(f["disabled"]) || f["chain"] != "forward" || f["in-interface"] != s.WAN || (f["dst-address"] != s.Destination && f["dst-address"] != s.Destination+"/32") || geoProtocol(f["protocol"]) != s.Protocol || !geoSinglePort(f["dst-port"], s.Port) {
 				return fmt.Errorf("существующие правила этого идентификатора отличаются или повреждены; проверьте firewall вручную")
 			}
 			if strings.HasSuffix(comment, "-allow") && f["action"] == "accept" {
@@ -241,24 +305,57 @@ func checkGeoNAT(s GeoNATSettings, read snapshotReader) error {
 	}
 	var listMembers []map[string]string
 	listsRead := false
+	var rejected []string
+	candidates := 0
 	for _, n := range nats {
-		if n["chain"] != "dstnat" || n["action"] != "dst-nat" || !explicitlyFalse(n["disabled"]) || explicitlyTrue(n["invalid"]) || n["protocol"] != s.Protocol {
+		if !geoSingleAddress(n["to-addresses"], dest) {
 			continue
 		}
-		ip := net.ParseIP(n["to-addresses"])
-		if ip == nil || !ip.Equal(dest) {
-			continue
+		candidates++
+		var reasons []string
+		if n["chain"] != "dstnat" {
+			reasons = append(reasons, "chain не dstnat")
+		}
+		if n["action"] != "dst-nat" {
+			reasons = append(reasons, "action не dst-nat")
+		}
+		if !geoFalse(n["disabled"]) {
+			if n["disabled"] == "" {
+				reasons = append(reasons, "disabled не получено")
+			} else if geoTrue(n["disabled"]) {
+				reasons = append(reasons, "правило выключено")
+			} else {
+				reasons = append(reasons, "неизвестное значение disabled")
+			}
+		}
+		if geoTrue(n["invalid"]) {
+			reasons = append(reasons, "правило invalid")
+		} else if n["invalid"] != "" && !geoFalse(n["invalid"]) {
+			reasons = append(reasons, "неизвестное значение invalid")
+		}
+		if geoProtocol(n["protocol"]) != s.Protocol {
+			if n["protocol"] == "" {
+				reasons = append(reasons, "protocol не получен")
+			} else if geoProtocol(n["protocol"]) == "" {
+				reasons = append(reasons, "неизвестный формат protocol")
+			} else {
+				reasons = append(reasons, "другой protocol")
+			}
 		}
 		port := n["to-ports"]
 		if port == "" {
 			port = n["dst-port"]
 		}
-		if port != s.Port {
-			continue
+		if !geoSinglePort(port, s.Port) {
+			if port == "" {
+				reasons = append(reasons, "не получен внутренний порт или dst-port")
+			} else {
+				reasons = append(reasons, "внутренний порт не совпал или задан диапазоном")
+			}
 		}
 		iface, group := n["in-interface"], n["in-interface-list"]
 		if iface != "" && iface != s.WAN {
-			continue
+			reasons = append(reasons, "другой in-interface")
 		}
 		if group != "" {
 			if !listsRead {
@@ -270,16 +367,25 @@ func checkGeoNAT(s GeoNATSettings, read snapshotReader) error {
 			}
 			found := false
 			for _, member := range listMembers {
-				if member["list"] == group && member["interface"] == s.WAN && explicitlyFalse(member["disabled"]) {
+				if member["list"] == group && member["interface"] == s.WAN && geoFalse(member["disabled"]) {
 					found = true
 					break
 				}
 			}
 			if !found {
-				continue
+				reasons = append(reasons, "не подтверждён WAN в in-interface-list")
 			}
 		}
-		return nil
+		if len(reasons) == 0 {
+			return nil
+		}
+		if len(rejected) < 3 {
+			rejected = append(rejected, strings.Join(reasons, ", "))
+		}
 	}
-	return fmt.Errorf("не найден однозначный включённый dst-nat на этот IPv4, внутренний порт, протокол и WAN; настройки не изменены")
+	message := "не найден однозначный включённый dst-nat на этот IPv4, внутренний порт, протокол и WAN; настройки не изменены"
+	if candidates == 0 {
+		return fmt.Errorf("%s. В ответе RouterOS нет записи с точным to-addresses", message)
+	}
+	return fmt.Errorf("%s. Записей с этим to-addresses: %d; причины отказа (до 3): %s", message, candidates, strings.Join(rejected, "; "))
 }

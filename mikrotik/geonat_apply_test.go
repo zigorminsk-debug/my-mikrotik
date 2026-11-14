@@ -3,6 +3,7 @@ package mikrotik
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -16,11 +17,11 @@ import (
 )
 
 func geoFixture() (GeoNATSettings, map[string][]map[string]string) {
-	g := GeoNATSettings{Enabled: true, Resource: "rdp", WAN: "ether1", Destination: "192.168.88.5", Port: "3389", Protocol: "tcp", Manual: "203.0.113.1", Acknowledged: true}
+	g := GeoNATSettings{Enabled: true, Resource: "rdp", WAN: "ether1", Destination: "192.168.88.50", Port: "3389", Protocol: "tcp", Manual: "203.0.113.1", Acknowledged: true}
 	data := map[string][]map[string]string{
 		"/interface":       {{"name": "ether1", "disabled": "false"}},
 		"/ip/address":      {{"address": "192.168.88.1/24"}},
-		"/ip/firewall/nat": {{"chain": "dstnat", "action": "dst-nat", "disabled": "false", "protocol": "tcp", "to-addresses": "192.168.88.5", "to-ports": "3389", "in-interface": "ether1"}},
+		"/ip/firewall/nat": {{"chain": "dstnat", "action": "dst-nat", "disabled": "false", "protocol": "tcp", "to-addresses": "192.168.88.50", "to-ports": "3389", "in-interface": "ether1"}},
 	}
 	return g, data
 }
@@ -33,22 +34,22 @@ func TestGeoNATPreflight(t *testing.T) {
 	}{
 		{"exact", func(_ GeoNATSettings, _ map[string][]map[string]string) {}, true},
 		{"local-device", func(_ GeoNATSettings, d map[string][]map[string]string) {
-			d["/ip/address"] = append(d["/ip/address"], map[string]string{"address": "192.168.88.5/24"})
+			d["/ip/address"] = append(d["/ip/address"], map[string]string{"address": "192.168.88.50/24"})
 		}, false},
 		{"bad-address", func(_ GeoNATSettings, d map[string][]map[string]string) {
 			d["/ip/address"] = []map[string]string{{"address": "broken"}}
 		}, false},
 		{"other-resource-conflict", func(_ GeoNATSettings, d map[string][]map[string]string) {
-			d["/ip/firewall/filter"] = []map[string]string{{"comment": "mti-nat-other-allow", "chain": "forward", "in-interface": "ether1", "dst-address": "192.168.88.5", "protocol": "tcp", "dst-port": "3389"}}
+			d["/ip/firewall/filter"] = []map[string]string{{"comment": "mti-nat-other-allow", "chain": "forward", "in-interface": "ether1", "dst-address": "192.168.88.50", "protocol": "tcp", "dst-port": "3389"}}
 		}, false},
 		{"other-resource-subnet-conflict", func(_ GeoNATSettings, d map[string][]map[string]string) {
 			d["/ip/firewall/filter"] = []map[string]string{{"comment": "mti-nat-other-allow", "chain": "forward", "in-interface": "ether1", "dst-address": "192.168.88.0/24", "protocol": "tcp", "dst-port": "3300-3400"}}
 		}, false},
 		{"own-complete", func(_ GeoNATSettings, d map[string][]map[string]string) {
-			d["/ip/firewall/filter"] = []map[string]string{{"comment": "mti-nat-a0680e7d85c72ada-x-allow", "chain": "forward", "disabled": "false", "action": "accept", "in-interface": "ether1", "dst-address": "192.168.88.5", "protocol": "tcp", "dst-port": "3389"}, {"comment": "mti-nat-a0680e7d85c72ada-x-drop", "chain": "forward", "disabled": "false", "action": "drop", "in-interface": "ether1", "dst-address": "192.168.88.5", "protocol": "tcp", "dst-port": "3389"}}
+			d["/ip/firewall/filter"] = []map[string]string{{"comment": "mti-nat-a0680e7d85c72ada-x-allow", "chain": "forward", "disabled": "false", "action": "accept", "in-interface": "ether1", "dst-address": "192.168.88.50", "protocol": "tcp", "dst-port": "3389"}, {"comment": "mti-nat-a0680e7d85c72ada-x-drop", "chain": "forward", "disabled": "false", "action": "drop", "in-interface": "ether1", "dst-address": "192.168.88.50", "protocol": "tcp", "dst-port": "3389"}}
 		}, true},
 		{"own-incomplete", func(_ GeoNATSettings, d map[string][]map[string]string) {
-			d["/ip/firewall/filter"] = []map[string]string{{"comment": "mti-nat-a0680e7d85c72ada-x-allow", "chain": "forward", "disabled": "false", "action": "accept", "in-interface": "ether1", "dst-address": "192.168.88.5", "protocol": "tcp", "dst-port": "3389"}}
+			d["/ip/firewall/filter"] = []map[string]string{{"comment": "mti-nat-a0680e7d85c72ada-x-allow", "chain": "forward", "disabled": "false", "action": "accept", "in-interface": "ether1", "dst-address": "192.168.88.50", "protocol": "tcp", "dst-port": "3389"}}
 		}, false},
 		{"no-nat", func(_ GeoNATSettings, d map[string][]map[string]string) { d["/ip/firewall/nat"] = nil }, false},
 		{"disabled", func(_ GeoNATSettings, d map[string][]map[string]string) {
@@ -123,10 +124,12 @@ func TestGeoNATRESTPreflightAndApply(t *testing.T) {
 		wantErr  string
 		writes   int
 	}{
-		{"success", "router", `[{"chain":"dstnat","action":"dst-nat","disabled":false,"invalid":false,"protocol":"tcp","to-addresses":"192.168.88.5","to-ports":"3389","in-interface":"ether1"}]`, false, "", 3},
+		{"success", "router", `[{"chain":"dstnat","action":"dst-nat","disabled":false,"invalid":false,"protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3389","in-interface":"ether1"}]`, false, "", 3},
+		{"numeric-json", "router", `[{"chain":"dstnat","action":"dst-nat","disabled":0,"invalid":0,"protocol":6,"to-addresses":"192.168.88.50-192.168.88.50","to-ports":"3389-3389","in-interface":"ether1"}]`, false, "", 3},
+		{"invalid", "router", `[{"chain":"dstnat","action":"dst-nat","disabled":false,"invalid":true,"protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3389","in-interface":"ether1"}]`, false, "invalid", 0},
 		{"no-nat", "router", `[]`, false, "не найден", 0},
 		{"identity-changed", "other", `[]`, false, "изменились", 0},
-		{"run-error", "router", `[{"chain":"dstnat","action":"dst-nat","disabled":false,"protocol":"tcp","to-addresses":"192.168.88.5","to-ports":"3389","in-interface":"ether1"}]`, true, "частично", 3},
+		{"run-error", "router", `[{"chain":"dstnat","action":"dst-nat","disabled":false,"protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3389","in-interface":"ether1"}]`, true, "частично", 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var mu sync.Mutex
@@ -187,6 +190,10 @@ func TestGeoNATRESTPreflightAndApply(t *testing.T) {
 				}
 			} else if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("expected %q: %v", tc.wantErr, err)
+			}
+			var preflight *GeoPreflightError
+			if err != nil && errors.As(err, &preflight) != (tc.writes == 0) {
+				t.Fatalf("incorrect error stage: %v", err)
 			}
 			mu.Lock()
 			defer mu.Unlock()
@@ -289,7 +296,7 @@ func TestGeoNATAPISameSessionNoRetry(t *testing.T) {
 						_ = writeSentence(conn, "!done")
 					case "/ip/firewall/nat/print":
 						if tc.nat {
-							_ = writeSentence(conn, "!re", "=chain=dstnat", "=action=dst-nat", "=disabled=false", "=protocol=tcp", "=to-addresses=192.168.88.5", "=to-ports=3389", "=in-interface=ether1")
+							_ = writeSentence(conn, "!re", "=chain=dstnat", "=action=dst-nat", "=disabled=false", "=protocol=6", "=to-addresses=192.168.88.50", "=to-ports=3389", "=in-interface=ether1", "=comment=mti-forward-0-wan")
 						}
 						_ = writeSentence(conn, "!done")
 					case "/system/script/print", "/system/script/remove", "/system/script/add":
@@ -306,6 +313,7 @@ func TestGeoNATAPISameSessionNoRetry(t *testing.T) {
 				}
 			}()
 			req := makeGeoRequest(0)
+			req.Geo.Destination = "192.168.88.50"
 			req.Conn.Protocol = "api"
 			req.Conn.APIPort = ln.Addr().(*net.TCPAddr).Port
 			req.Device.Protocol = "api"
@@ -333,5 +341,70 @@ func TestGeoNATAPISameSessionNoRetry(t *testing.T) {
 				t.Fatalf("writes=%d commands=%v", writes, got)
 			}
 		})
+	}
+}
+
+func TestGeoNATDiagnosticReadOnlyREST(t *testing.T) {
+	for _, tc := range []struct {
+		name, nat, want string
+		matched         bool
+	}{
+		{"matching", `[{"chain":"dstnat","action":"dst-nat","disabled":false,"protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3389","dst-port":"3389","in-interface":"ether1","comment":"mti-forward-0-wan"}]`, "Совпадающее", true},
+		{"missing-disabled", `[{"chain":"dstnat","action":"dst-nat","protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3389","in-interface":"ether1"}]`, "disabled не получено", false},
+		{"unknown-invalid", `[{"chain":"dstnat","action":"dst-nat","disabled":false,"invalid":"PRIVATE","protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3389","in-interface":"ether1"}]`, "неизвестное значение invalid", false},
+		{"range", `[{"chain":"dstnat","action":"dst-nat","disabled":false,"protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3389-3390","in-interface":"ether1"}]`, "диапазоном", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls = append(calls, r.Method+" "+r.URL.Path)
+				switch r.Method + " " + r.URL.Path {
+				case "GET /rest/system/identity":
+					fmt.Fprint(w, `[{"name":"router"}]`)
+				case "GET /rest/system/resource":
+					fmt.Fprint(w, `[{"version":"7.25.1","board-name":"hAP ac^2","architecture-name":"arm"}]`)
+				case "GET /rest/interface":
+					fmt.Fprint(w, `[{"name":"ether1","disabled":false}]`)
+				case "GET /rest/ip/address":
+					fmt.Fprint(w, `[{"address":"192.168.88.1/24"}]`)
+				case "GET /rest/ip/firewall/filter":
+					fmt.Fprint(w, `[]`)
+				case "GET /rest/ip/firewall/nat":
+					fmt.Fprint(w, tc.nat)
+				default:
+					t.Errorf("unexpected call %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(500)
+				}
+			}))
+			defer srv.Close()
+			u, _ := url.Parse(srv.URL)
+			_, p, _ := net.SplitHostPort(u.Host)
+			port, _ := strconv.Atoi(p)
+			req := makeGeoRequest(port)
+			req.Geo.Destination = "192.168.88.50"
+			matched, msg, err := DiagnoseGeoNAT(context.Background(), req)
+			if err != nil || matched != tc.matched || !strings.Contains(msg, tc.want) || strings.Contains(msg, "PRIVATE") {
+				t.Fatalf("%t %q %v", matched, msg, err)
+			}
+			for _, c := range calls {
+				if !strings.HasPrefix(c, "GET ") {
+					t.Fatalf("write in diagnostic: %s", c)
+				}
+			}
+		})
+	}
+}
+
+func TestGeoNATUnknownProtocolConflictsAndDiagnostics(t *testing.T) {
+	g, d := geoFixture()
+	d["/ip/firewall/filter"] = []map[string]string{{"comment": "mti-nat-someone-allow", "chain": "forward", "protocol": "PRIVATE", "dst-address": g.Destination, "dst-port": g.Port, "in-interface": g.WAN}}
+	read := func(path string) ([]map[string]string, error) { return d[path], nil }
+	if err := checkGeoNAT(g, read); err == nil || !strings.Contains(err.Error(), "конфликт") || strings.Contains(err.Error(), "PRIVATE") {
+		t.Fatalf("conflict: %v", err)
+	}
+	d["/ip/firewall/filter"] = nil
+	d["/ip/firewall/nat"][0]["protocol"] = "PRIVATE"
+	if err := checkGeoNAT(g, read); err == nil || !strings.Contains(err.Error(), "неизвестный формат protocol") || strings.Contains(err.Error(), "PRIVATE") {
+		t.Fatalf("diagnostic: %v", err)
 	}
 }
