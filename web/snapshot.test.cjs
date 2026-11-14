@@ -6,7 +6,7 @@ const html = fs.readFileSync(require('node:path').join(__dirname, 'index.html'),
 const start = html.indexOf('  function clearNetworkSnapshot()');
 const end = html.indexOf('  // Snapshot comparison is local', start);
 assert(start >= 0 && end > start);
-const names = ['snapshot-output','snapshot-run','snapshot-copy','snapshot-download','snapshot-history','snapshot-lte','snapshot-topology','appver'];
+const names = ['snapshot-output','snapshot-run','snapshot-copy','snapshot-download','snapshot-history','snapshot-lte','snapshot-topology','snapshot-leases','appver'];
 const el = Object.fromEntries(names.map(n => [n, {textContent:'', disabled:false, addEventListener(type, fn) {this.handler=fn;}}]));
 el.appver.textContent='v0.2.6';
 let resolveFetch, sent;
@@ -33,6 +33,9 @@ assert.doesNotMatch(ctx.formatNetworkSnapshot({sections:{}},'v'),/История
 const topo=ctx.formatNetworkSnapshot({sections:{bridges:{status:'ok',rows:[{name:'bridge','vlan-filtering':'true'}]},bridgePorts:{status:'ok',truncated:true,rows:[{interface:'ether2',bridge:'bridge',pvid:'10'}]},bridgeVLANs:{status:'error'},vlanInterfaces:{status:'skipped'}}},'v');
 assert.match(topo,/vlan-filtering=true/); assert.match(topo,/pvid=10/); assert.match(topo,/Таблица VLAN bridge:\n  Не удалось прочитать/); assert.match(topo,/VLAN-интерфейсы:\n  Не прочитано/); assert.match(topo,/Показаны не все записи/); assert.match(topo,/не полная топология/);
 assert.doesNotMatch(ctx.formatNetworkSnapshot({sections:{}},'v'),/Таблица VLAN bridge/);
+const leaseReport=ctx.formatNetworkSnapshot({sections:{dhcpLeases:{status:'ok',rows:[{address:'192.168.88.10','active-mac-address':'AA:BB:CC:DD:EE:FF','host-name':'test\nИнтерфейсы:; status=bound',status:'bound'}]}}},'v');
+assert.match(leaseReport,/Аренды DHCP-сервера/); assert.match(leaseReport,/AA:BB:CC:DD:EE:FF/); assert.match(leaseReport,/status=bound/); assert.doesNotMatch(leaseReport,/test\nИнтерфейсы/); assert.match(leaseReport,/test\\u000aИнтерфейсы:\\u003b status\\u003dbound/); assert.match(leaseReport,/частными данными/);
+assert.doesNotMatch(ctx.formatNetworkSnapshot({sections:{}},'v'),/Аренды DHCP-сервера/);
 assert.match(lanReport, /DHCP-серверы/); assert.match(lanReport, /defconf/); assert.match(lanReport, /IPv4-пулы/); assert.match(lanReport, /DHCP-сети/);
 
 assert.equal(warns([lte, ethernet, controlled]), true);
@@ -42,12 +45,12 @@ assert.equal(warns([lte, {...ethernet,'routing-table':'mti-probe'}]), false);
 assert.equal(warns([lte, {...lte}]), false);
 assert.equal(ctx.formatNetworkSnapshot(mk([lte,ethernet],'error'),'v').includes('ВНИМАНИЕ: в main'), false);
 (async()=>{
-  el['snapshot-history'].checked=true; el['snapshot-lte'].checked=true; el['snapshot-topology'].checked=true;
+  el['snapshot-history'].checked=true; el['snapshot-lte'].checked=true; el['snapshot-topology'].checked=true; el['snapshot-leases'].checked=true;
   el['snapshot-run'].handler.call(el['snapshot-run']);
-  assert.equal(sent.body.includeHistory,true); assert.equal(sent.body.includeLTE,true); assert.equal(sent.body.includeTopology,true);
+  assert.equal(sent.body.includeHistory,true); assert.equal(sent.body.includeLTE,true); assert.equal(sent.body.includeTopology,true); assert.equal(sent.body.includeLeases,true);
   assert.equal(sent.url,'/api/network-snapshot');
   assert.equal(sent.body.conn.protocol,'rest');
-  el['snapshot-topology'].handler();
+  el['snapshot-leases'].handler();
   resolveFetch({ok:true,json:()=>Promise.resolve({ok:true,snapshot:{protocol:'rest',sections:{}}})});
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(el['snapshot-output'].textContent,'');

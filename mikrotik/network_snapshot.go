@@ -57,21 +57,28 @@ var topologySnapshotSpecs = []snapshotSpec{
 	{"vlanInterfaces", "/interface/vlan", []string{"name", "interface", "vlan-id", "use-service-tag", "mtu", "disabled", "running"}, nil},
 }
 
+// DHCP server lease inventory is opt-in. Do not include client identifiers,
+// comments, vendor options, or router-side scripts in the report.
+var leaseSnapshotSpec = snapshotSpec{"dhcpLeases", "/ip/dhcp-server/lease", []string{"address", "active-address", "mac-address", "active-mac-address", "host-name", "server", "status", "expires-after", "last-seen", "dynamic", "disabled", "blocked"}, nil}
+
 const maxSnapshotRows = 500
 
 type snapshotReader func(string) ([]map[string]string, error)
 
 // buildSnapshot does not return arbitrary router records: fields are allowlisted.
 func buildSnapshot(ctx context.Context, protocol string, read snapshotReader, stopOnError bool, includeHistory ...bool) *NetworkSnapshot {
-	return buildSnapshotWithOptions(ctx, protocol, read, stopOnError, len(includeHistory) > 0 && includeHistory[0], false)
+	return buildSnapshotWithOptions(ctx, protocol, read, stopOnError, NetworkSnapshotOptions{IncludeHistory: len(includeHistory) > 0 && includeHistory[0]})
 }
 
-func buildSnapshotWithOptions(ctx context.Context, protocol string, read snapshotReader, stopOnError, includeHistory, includeTopology bool) *NetworkSnapshot {
+func buildSnapshotWithOptions(ctx context.Context, protocol string, read snapshotReader, stopOnError bool, options NetworkSnapshotOptions) *NetworkSnapshot {
 	s := &NetworkSnapshot{Protocol: protocol, StartedAt: time.Now().UTC(), Sections: make(map[string]SnapshotSection)}
 	stopped := false
 	specs := snapshotSpecs
-	if includeTopology {
+	if options.IncludeTopology {
 		specs = append(append([]snapshotSpec(nil), snapshotSpecs...), topologySnapshotSpecs...)
+	}
+	if options.IncludeLeases {
+		specs = append(append([]snapshotSpec(nil), specs...), leaseSnapshotSpec)
 	}
 	for _, spec := range specs {
 		section := SnapshotSection{Status: "skipped", Rows: []map[string]string{}}
@@ -113,7 +120,7 @@ func buildSnapshotWithOptions(ctx context.Context, protocol string, read snapsho
 		}
 		s.Sections[spec.id] = section
 	}
-	if includeHistory {
+	if options.IncludeHistory {
 		section := SnapshotSection{Status: "skipped", Rows: []map[string]string{}}
 		if !stopped && ctx.Err() == nil {
 			recs, err := read("/log")
@@ -136,6 +143,7 @@ type NetworkSnapshotOptions struct {
 	IncludeHistory  bool
 	IncludeLTE      bool
 	IncludeTopology bool
+	IncludeLeases   bool
 }
 
 func CollectNetworkSnapshot(ctx context.Context, p Params, expected *Info, includeHistory ...bool) (*NetworkSnapshot, error) {
@@ -170,6 +178,10 @@ func CollectNetworkSnapshotWithOptions(ctx context.Context, p Params, expected *
 			return nil, fmt.Errorf("не удалось авторизоваться для снимка")
 		}
 		read = func(path string) ([]map[string]string, error) {
+			if path == leaseSnapshotSpec.path {
+				recs, _, err := c.exec(path+"/print", "=.proplist="+strings.Join(leaseSnapshotSpec.fields, ","))
+				return recs, err
+			}
 			recs, _, err := c.exec(path + "/print")
 			return recs, err
 		}
@@ -187,7 +199,11 @@ func CollectNetworkSnapshotWithOptions(ctx context.Context, p Params, expected *
 			return nil, err
 		}
 		read = func(path string) ([]map[string]string, error) {
-			recs, err := rc.get(ctx, "/rest"+path)
+			query := ""
+			if path == leaseSnapshotSpec.path {
+				query = "?.proplist=" + strings.Join(leaseSnapshotSpec.fields, ",")
+			}
+			recs, err := rc.get(ctx, "/rest"+path+query)
 			if err != nil {
 				return nil, err
 			}
@@ -260,7 +276,7 @@ func CollectNetworkSnapshotWithOptions(ctx context.Context, p Params, expected *
 	if strings.TrimSpace(expected.RouterOS) == "" {
 		return nil, fmt.Errorf("нет версии устройства; подключитесь заново")
 	}
-	snapshot := buildSnapshotWithOptions(ctx, p.Protocol, read, p.Protocol == "api", options.IncludeHistory, options.IncludeTopology)
+	snapshot := buildSnapshotWithOptions(ctx, p.Protocol, read, p.Protocol == "api", options)
 	if options.IncludeLTE {
 		stopped := ctx.Err() != nil
 		if p.Protocol == "api" {

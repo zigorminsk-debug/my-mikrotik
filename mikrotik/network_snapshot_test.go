@@ -164,6 +164,12 @@ func TestCollectNetworkSnapshotAPI(t *testing.T) {
 			case "/system/resource/print":
 				_ = writeSentence(conn, "!re", "=board-name=hAP", "=architecture-name=arm", "=version=7.15")
 				_ = writeSentence(conn, "!done")
+			case "/ip/dhcp-server/lease/print":
+				if len(s) != 2 || s[1] != "=.proplist="+strings.Join(leaseSnapshotSpec.fields, ",") {
+					t.Errorf("bad lease properties: %v", s)
+				}
+				_ = writeSentence(conn, "!re", "=address=192.0.2.10", "=host-name=workstation", "=status=bound", "=client-id=PRIVATE")
+				_ = writeSentence(conn, "!done")
 			case "/interface/bridge/port/print":
 				_ = writeSentence(conn, "!re", "=interface=ether2", "=bridge=bridge", "=pvid=10", "=comment=PRIVATE")
 				_ = writeSentence(conn, "!done")
@@ -178,7 +184,7 @@ func TestCollectNetworkSnapshotAPI(t *testing.T) {
 	port := ln.Addr().(*net.TCPAddr).Port
 	p := Params{Host: "127.0.0.1", APIPort: port, User: "admin", Password: "secret", Protocol: "api"}
 	expected := &Info{Protocol: "api", Identity: "router", RouterOS: "7.15", Architecture: "arm", Diagnostics: &IdentityDiagnostics{ResourceBoard: "hAP"}}
-	s, err := CollectNetworkSnapshotWithOptions(context.Background(), p, expected, NetworkSnapshotOptions{IncludeTopology: true})
+	s, err := CollectNetworkSnapshotWithOptions(context.Background(), p, expected, NetworkSnapshotOptions{IncludeTopology: true, IncludeLeases: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,8 +198,11 @@ func TestCollectNetworkSnapshotAPI(t *testing.T) {
 	if strings.Contains(string(raw), "PRIVATE") {
 		t.Fatal("private data leaked")
 	}
+	if len(s.Sections["dhcpLeases"].Rows) != 1 || s.Sections["dhcpLeases"].Rows[0]["status"] != "bound" {
+		t.Fatalf("lease data: %+v", s.Sections["dhcpLeases"])
+	}
 	got := <-commands
-	want := []string{"/login", "/system/identity/print", "/system/resource/print", "/interface/print", "/ip/address/print", "/ip/dhcp-client/print", "/ip/route/print", "/system/scheduler/print", "/system/script/environment/print", "/ip/dhcp-server/print", "/ip/pool/print", "/ip/dhcp-server/network/print", "/interface/bridge/print", "/interface/bridge/port/print", "/interface/bridge/vlan/print", "/interface/vlan/print"}
+	want := []string{"/login", "/system/identity/print", "/system/resource/print", "/interface/print", "/ip/address/print", "/ip/dhcp-client/print", "/ip/route/print", "/system/scheduler/print", "/system/script/environment/print", "/ip/dhcp-server/print", "/ip/pool/print", "/ip/dhcp-server/network/print", "/interface/bridge/print", "/interface/bridge/port/print", "/interface/bridge/vlan/print", "/interface/vlan/print", "/ip/dhcp-server/lease/print"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("unexpected commands: %v", got)
 	}
@@ -250,7 +259,7 @@ func TestTopologySnapshotOptionalAndSafety(t *testing.T) {
 		}
 		return []map[string]string{}, nil
 	}
-	s := buildSnapshotWithOptions(context.Background(), "rest", read, false, false, false)
+	s := buildSnapshotWithOptions(context.Background(), "rest", read, false, NetworkSnapshotOptions{})
 	for _, spec := range topologySnapshotSpecs {
 		if _, ok := s.Sections[spec.id]; ok {
 			t.Fatalf("not opt-in: %s", spec.id)
@@ -262,7 +271,7 @@ func TestTopologySnapshotOptionalAndSafety(t *testing.T) {
 		}
 	}
 	calls = nil
-	s = buildSnapshotWithOptions(context.Background(), "rest", read, false, false, true)
+	s = buildSnapshotWithOptions(context.Background(), "rest", read, false, NetworkSnapshotOptions{IncludeTopology: true})
 	if s.Sections["bridgeVLANs"].Status != "error" || s.Sections["vlanInterfaces"].Status != "ok" || s.Sections["bridgePorts"].Rows[0]["pvid"] != "10" {
 		t.Fatalf("bad partial snapshot: %+v", s.Sections)
 	}
@@ -274,7 +283,7 @@ func TestTopologySnapshotOptionalAndSafety(t *testing.T) {
 		t.Fatalf("leaked field/error: %s", b)
 	}
 	calls = nil
-	s = buildSnapshotWithOptions(context.Background(), "api", read, true, true, true)
+	s = buildSnapshotWithOptions(context.Background(), "api", read, true, NetworkSnapshotOptions{IncludeHistory: true, IncludeTopology: true})
 	if s.Sections["bridgeVLANs"].Status != "error" || s.Sections["vlanInterfaces"].Status != "skipped" || s.Sections["failoverHistory"].Status != "skipped" {
 		t.Fatalf("API failure not stopped: %+v", s.Sections)
 	}
@@ -286,8 +295,70 @@ func TestTopologySnapshotOptionalAndSafety(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	calls = nil
-	s = buildSnapshotWithOptions(ctx, "api", read, true, false, true)
+	s = buildSnapshotWithOptions(ctx, "api", read, true, NetworkSnapshotOptions{IncludeTopology: true})
 	if len(calls) > 0 || s.Sections["bridges"].Status != "skipped" {
 		t.Fatal("cancelled snapshot read")
+	}
+}
+
+func TestLeaseSnapshotOptInAndPartialResults(t *testing.T) {
+	calls := []string{}
+	read := func(path string) ([]map[string]string, error) {
+		calls = append(calls, path)
+		if path == leaseSnapshotSpec.path {
+			rows := make([]map[string]string, maxSnapshotRows+1)
+			for i := range rows {
+				rows[i] = map[string]string{"address": "192.0.2.10", "mac-address": "AA:BB:CC:DD:EE:FF", "host-name": "workstation", "status": "bound", "client-id": "PRIVATE", "comment": "PRIVATE"}
+			}
+			return rows, nil
+		}
+		return []map[string]string{}, nil
+	}
+	s := buildSnapshotWithOptions(context.Background(), "rest", read, false, NetworkSnapshotOptions{})
+	if _, ok := s.Sections["dhcpLeases"]; ok {
+		t.Fatal("leases not opt-in")
+	}
+	for _, p := range calls {
+		if p == leaseSnapshotSpec.path {
+			t.Fatal("unexpected lease read")
+		}
+	}
+	s = buildSnapshotWithOptions(context.Background(), "rest", read, false, NetworkSnapshotOptions{IncludeLeases: true})
+	section := s.Sections["dhcpLeases"]
+	if section.Status != "ok" || len(section.Rows) != 500 || !section.Truncated || section.Rows[0]["host-name"] != "workstation" {
+		t.Fatalf("lease result: %+v", section)
+	}
+	if _, ok := section.Rows[0]["disabled"]; ok {
+		t.Fatal("missing field must remain unknown")
+	}
+	raw, _ := json.Marshal(s)
+	if strings.Contains(string(raw), "PRIVATE") {
+		t.Fatal("confidential field leaked")
+	}
+	for _, api := range []bool{false, true} {
+		readErr := func(path string) ([]map[string]string, error) {
+			if path == leaseSnapshotSpec.path {
+				return nil, fmt.Errorf("PRIVATE")
+			}
+			return []map[string]string{}, nil
+		}
+		s = buildSnapshotWithOptions(context.Background(), "api", readErr, api, NetworkSnapshotOptions{IncludeLeases: true, IncludeHistory: true})
+		if s.Sections["dhcpLeases"].Status != "error" {
+			t.Fatal("lease error hidden")
+		}
+		expected := "ok"
+		if api {
+			expected = "skipped"
+		}
+		if s.Sections["failoverHistory"].Status != expected {
+			t.Fatalf("history after lease error: %+v", s.Sections)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	calls = nil
+	s = buildSnapshotWithOptions(ctx, "api", read, true, NetworkSnapshotOptions{IncludeLeases: true})
+	if len(calls) != 0 || s.Sections["dhcpLeases"].Status != "skipped" {
+		t.Fatal("cancelled lease read")
 	}
 }

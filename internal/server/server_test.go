@@ -386,6 +386,11 @@ func TestNetworkSnapshotOverHTTP(t *testing.T) {
 			w.WriteHeader(403)
 		case "/rest/interface/vlan":
 			io.WriteString(w, `[{"name":"vlan10","vlan-id":"10"}]`)
+		case "/rest/ip/dhcp-server/lease":
+			if r.URL.Query().Get(".proplist") != "address,active-address,mac-address,active-mac-address,host-name,server,status,expires-after,last-seen,dynamic,disabled,blocked" {
+				t.Errorf("invalid proplist %s", r.URL.RawQuery)
+			}
+			io.WriteString(w, `[{"address":"192.0.2.10","host-name":"client","status":"bound","client-id":"topsecret"}]`)
 		case "/rest/interface":
 			io.WriteString(w, `[{"name":"ether1","running":"true"}]`)
 		default:
@@ -402,7 +407,7 @@ func TestNetworkSnapshotOverHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := map[string]any{"includeTopology": true, "conn": map[string]any{"host": host, "restPort": port, "user": "admin", "password": "topsecret", "protocol": "rest"}, "device": map[string]any{"protocol": "rest", "identity": "router", "routeros": "7.15", "architecture": "arm", "diagnostics": map[string]any{"resourceBoard": "hAP"}}}
+	req := map[string]any{"includeTopology": true, "includeLeases": true, "conn": map[string]any{"host": host, "restPort": port, "user": "admin", "password": "topsecret", "protocol": "rest"}, "device": map[string]any{"protocol": "rest", "identity": "router", "routeros": "7.15", "architecture": "arm", "diagnostics": map[string]any{"resourceBoard": "hAP"}}}
 	b, _ := json.Marshal(req)
 	srv := newTestServer(t)
 	resp, err := http.Post(srv.URL+"/api/network-snapshot", "application/json", bytes.NewReader(b))
@@ -424,6 +429,9 @@ func TestNetworkSnapshotOverHTTP(t *testing.T) {
 		t.Fatalf("bad response: %v %s", err, raw)
 	}
 	sections := result.Snapshot.Sections
+	if len(sections["dhcpLeases"].Rows) != 1 || sections["dhcpLeases"].Rows[0]["host-name"] != "client" {
+		t.Fatalf("leases: %+v", sections["dhcpLeases"])
+	}
 	if sections["bridges"].Rows[0]["name"] != "bridge" || sections["bridgePorts"].Rows[0]["pvid"] != "10" || sections["bridgeVLANs"].Status != "error" || sections["vlanInterfaces"].Status != "ok" {
 		t.Fatalf("topology: %+v", sections)
 	}

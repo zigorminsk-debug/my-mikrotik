@@ -31,6 +31,9 @@ const withBridge=header+sec('Интерфейсы',[i1])+sec('Bridge',['name=bri
 out=ctx.compareSnapshotReports(withBridge,header+sec('Интерфейсы',[i1])); assert.match(out,/Bridge:\n  Нет раздела во втором/);
 out=ctx.compareSnapshotReports(withBridge,withBridge); assert.match(out,/Bridge:\n  Распознанные строки совпадают/);
 out=ctx.compareSnapshotReports(header+sec('Интерфейсы',[i1]),header+sec('Интерфейсы',[i1])); assert.doesNotMatch(out,/Bridge:/);
+const leases=header+sec('Интерфейсы',[i1])+sec('Аренды DHCP-сервера',['address=192.168.88.10; status=bound']);
+out=ctx.compareSnapshotReports(leases,header+sec('Интерфейсы',[i1]));assert.match(out,/Аренды DHCP-сервера:\n  Нет раздела во втором/);
+out=ctx.compareSnapshotReports(leases,leases);assert.match(out,/Аренды DHCP-сервера:\n  Распознанные строки совпадают/);
 assert.throws(()=>ctx.parseSnapshotReport('wrong'),/не похож/);
 assert.throws(()=>ctx.parseSnapshotReport(header+sec('Интерфейсы',[])+sec('Интерфейсы',[])),/повторяется/);
 assert.throws(()=>ctx.parseSnapshotReport(header+'\nИнтерфейсы:\n  1. name='+('x'.repeat(8193))+'\n'),/длинная строка/);
