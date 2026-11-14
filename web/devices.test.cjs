@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs'); const vm = require('node:vm'); const path = require('node:path');
 const html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
-const start=html.indexOf('  // Desktop device list:'),end=html.indexOf('  loadPrefs();',start);assert(start>=0&&end>start);
+const start=html.indexOf('  // Desktop device list:'),end=html.indexOf('  // Offline advisory only;',start);assert(start>=0&&end>start);
 assert(html.indexOf('id="devices-card"')<html.indexOf('<section id="result">'));
 const ids=['devices-select','devices-name','devices-host','devices-note','devices-add','devices-update','devices-delete','devices-use','devices-refresh','devices-export','devices-file','devices-import','devices-status','host','password','go'];
 const els=Object.fromEntries(ids.map(id=>[id,{value:'',files:[],disabled:false,textContent:'',children:[],addEventListener(type,fn){this['on'+type]=fn},appendChild(e){this.children.push(e)}}]));

@@ -40,6 +40,7 @@ jobs:
           node web/ui.test.cjs
           node web/snapshot.test.cjs
           node web/snapshot-compare.test.cjs
+          node web/lan-check.test.cjs
           node web/devices.test.cjs
           node web/apply.test.cjs
 

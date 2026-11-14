@@ -305,6 +305,19 @@
 
     <div id="status" class="error-box"></div>
 
+    <section class="card" id="lan-inspect-card">
+      <h2>Предварительная проверка LAN по снимку</h2>
+      <div class="hint">Выберите сохранённый .txt снимок каналов и маршрутов и укажите предполагаемый IPv4-адрес роутера с маской. Сравнение выполняется локально; подключение и изменения не выполняются. Снимок может быть устаревшим или относиться к другому устройству.</div>
+      <div class="grid">
+        <label class="field">Сохранённый снимок<input type="file" id="lan-check-file" accept=".txt,text/plain"></label>
+        <label class="field">Предлагаемый LAN IPv4/CIDR<input id="lan-check-address" placeholder="192.168.88.1/24" maxlength="18" spellcheck="false"></label>
+        <label class="field">Имя LAN-интерфейса (необязательно)<input id="lan-check-interface" maxlength="128" spellcheck="false"></label>
+      </div>
+      <div class="row"><button type="button" id="lan-check-run" disabled>Проверить снимок</button><button type="button" class="ghost" id="lan-check-copy" disabled>Скопировать результат</button><button type="button" class="ghost" id="lan-check-download" disabled>Скачать .txt</button></div>
+      <div class="hint">Предупреждения не являются планом миграции и не подтверждают безопасность применения. В отчёте могут быть частные адреса и имена интерфейсов.</div>
+      <pre id="lan-check-output" class="mono" aria-live="polite" style="white-space:pre-wrap;word-break:break-word;max-height:32rem;overflow:auto"></pre>
+    </section>
+
     <section class="card" id="snapshot-compare-card">
       <h2>Сравнение двух снимков</h2>
       <div class="hint">Выберите два ранее сохранённых .txt снимка каналов и маршрутов. Сравнение выполняется локально, подключение к роутеру не требуется. Отчёты могут содержать частные адреса и комментарии; проверьте результат перед передачей.</div>
@@ -2272,6 +2285,160 @@
     try { reader.readAsText(file, "UTF-8"); } catch (e) { deviceBusy = false; deviceControls(); deviceStatus("Не удалось прочитать файл."); }
   });
   refreshDeviceEntries();
+
+  // Offline advisory only; never changes RouterOS or enables LAN apply.
+  var lanCheckSeq = 0, lanCheckText = "";
+  function lanIPv4(text) {
+    var parts = text.split("."); if (parts.length !== 4) return null;
+    var n = 0;
+    for (var i = 0; i < 4; i++) {
+      if (!/^(0|[1-9][0-9]{0,2})$/.test(parts[i])) return null;
+      var octet = Number(parts[i]); if (octet > 255) return null; n = n * 256 + octet;
+    }
+    return n;
+  }
+  function lanCIDR(text) {
+    var match = /^([^/]+)\/(0|[1-9][0-9]?)$/.exec(text), ip = match ? lanIPv4(match[1]) : null;
+    if (!match || ip === null || Number(match[2]) > 32) return null;
+    var size = Math.pow(2, 32 - Number(match[2])), low = Math.floor(ip / size) * size;
+    return {low:low, high:low + size - 1, ip:ip, prefix:Number(match[2])};
+  }
+  function lanFormatIPv4(n) { return [Math.floor(n / 16777216) % 256, Math.floor(n / 65536) % 256, Math.floor(n / 256) % 256, n % 256].join("."); }
+  function lanOverlap(a, b) { return a.low <= b.high && b.low <= a.high; }
+  // Text reports are not escaped machine formats. Reject ambiguous/duplicate fields.
+  function lanParseRow(row, keys) {
+    var out = Object.create(null), pieces = row.split("; "), last = -1;
+    for (var i = 0; i < pieces.length; i++) {
+      var pos = pieces[i].indexOf("="), key = pieces[i].slice(0, pos), index = keys.indexOf(key);
+      if (pos <= 0 || index <= last || Object.prototype.hasOwnProperty.call(out, key)) return null;
+      last = index; out[key] = pieces[i].slice(pos + 1);
+    }
+    return out;
+  }
+  function lanPoolRanges(text) {
+    if (!text || text === "—") return null;
+    var parts = text.split(","), ranges = [];
+    for (var i = 0; i < parts.length; i++) {
+      var part = parts[i].trim(), pieces = part.split("-"), a, b, subnet;
+      if (pieces.length === 1 && part.indexOf("/") !== -1) { subnet = lanCIDR(part); if (!subnet) return null; ranges.push(subnet); continue; }
+      if (pieces.length > 2 || !pieces.length) return null;
+      a = lanIPv4(pieces[0].trim()); b = pieces.length === 2 ? lanIPv4(pieces[1].trim()) : a;
+      if (a === null || b === null || a > b) return null;
+      ranges.push({low:a, high:b});
+    }
+    return ranges;
+  }
+  function inspectLanSnapshot(text, address, iface) {
+    var target = lanCIDR(address.trim());
+    if (!target) throw new Error("Введите корректный IPv4-адрес с префиксом от 0 до 32, например 192.168.88.1/24.");
+    iface = iface.trim(); if (iface.length > 128 || /[\x00-\x1f\x7f]/.test(iface)) throw new Error("Некорректное имя интерфейса.");
+    var sections = parseSnapshotReport(text), output = ["MikroTik Inspector — предварительная проверка LAN по сохранённому снимку",
+      "Предложено: " + address.trim() + "; сеть: " + lanFormatIPv4(target.low) + "/" + target.prefix + "; интерфейс: " + (iface || "не указан"),
+      "Снимок может быть устаревшим или с другого устройства; сверка идентичности не выполнялась."];
+    function reportTime(label) {
+      var matches = text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n").filter(function (line) { return line.startsWith(label + ": "); });
+      return matches.length === 1 ? matches[0].slice(0, 160) : label + ": не определено";
+    }
+    output.push("По тексту файла (не проверено): " + reportTime("Начало (UTC)") + "; " + reportTime("Конец (UTC)"));
+    if (!sections.footerPresent) output.push("Внимание: отсутствует завершающий текст снимка; файл может быть повреждён или иметь другой формат.");
+    var count = 0, unknown = 0, details = 0, omitted = 0;
+    function detail(line) { if (details < 200) { output.push("  " + (line.length > 1000 ? line.slice(0, 1000) + "… [строка сокращена]" : line)); details++; } else omitted++; }
+    function visit(title, allowed, check) {
+      output.push("", title + ":"); var section = sections[title];
+      if (!section) { output.push("  Раздел отсутствует; оценка невозможна."); unknown++; return; }
+      if (section.error || section.invalid) { output.push("  Раздел не прочитан или неоднозначен; оценка невозможна."); unknown++; return; }
+      if (section.truncated) { output.push("  Раздел усечён: проверена только показанная часть."); unknown++; }
+      if (!section.rows.length) { output.push("  В снимке нет записей этого раздела."); return; }
+      var before = count, bad = 0, uncertain = 0;
+      section.rows.forEach(function (row) {
+        var fields = lanParseRow(row, allowed);
+        if (!fields || !check(fields, function () { uncertain++; })) bad++;
+      });
+      if (uncertain) { output.push("  Записей с неизвестным интерфейсом или состоянием: " + uncertain + "."); unknown += uncertain; }
+      if (bad) { output.push("  Не удалось оценить записей: " + bad + " (поля отсутствуют, неоднозначны или имеют неподдерживаемый формат)."); unknown += bad; }
+      if (count === before) output.push("  Пересечений в распознанных записях не показано; это не подтверждает их отсутствие.");
+    }
+    function showOverlap(label, fields, value) {
+      count++; detail(label + ": " + value + " · интерфейс=" + (fields.interface || "—") + " · disabled=" + (fields.disabled || "—") + " · dynamic=" + (fields.dynamic || "—"));
+    }
+    function known(field) { return !!field && field !== "—"; }
+    visit("IPv4-адреса", ["address","network","interface","actual-interface","dynamic","disabled","invalid","mti-owned"], function (f, uncertain) {
+      var cidr = lanCIDR(f.address || ""); if (!cidr) return false;
+      if (!known(f.interface) || !known(f.disabled) || !known(f.invalid)) uncertain();
+      if (lanOverlap(target, cidr)) showOverlap("Пересечение адреса/маски", f, f.address);
+      // RouterOS network can differ from the calculated subnet on point-to-point links.
+      if (!f.network || f.network === "—") return false;
+      var routerNetwork = lanIPv4(f.network); if (routerNetwork === null) return false;
+      if (routerNetwork !== cidr.low) { detail("Поле network=" + f.network + " отличается от сети адреса " + f.address + "; возможна специальная конфигурация, проверьте вручную."); unknown++; }
+      return true;
+    });
+    visit("DHCP-клиенты", ["interface","status","address","gateway","add-default-route","default-route-distance","disabled","dynamic"], function (f, uncertain) {
+      var cidr = lanCIDR(f.address || ""); if (!cidr) return false;
+      if (!known(f.interface) || !known(f.status) || !known(f.disabled)) uncertain();
+      if (lanOverlap(target, cidr)) showOverlap("Пересечение адреса DHCP-клиента", f, f.address); return true;
+    });
+    visit("DHCP-сети", ["address","gateway","dns-server","mti-owned"], function (f) {
+      var cidr = lanCIDR(f.address || ""); if (!cidr) return false;
+      if (lanOverlap(target, cidr)) showOverlap("Пересечение DHCP-сети", f, f.address); return true;
+    });
+    visit("IPv4-пулы", ["name","ranges","next-pool"], function (f) {
+      var ranges = lanPoolRanges(f.ranges); if (!ranges) return false;
+      if (ranges.some(function (range) { return lanOverlap(target, range); })) { count++; detail("Пересечение пула: name=" + (f.name || "—") + " · ranges=" + f.ranges + " · next-pool=" + (f["next-pool"] || "—")); }
+      if (!f["next-pool"] || f["next-pool"] === "—") { unknown++; detail("Связь next-pool не определена; цепочки пулов не проверяются."); }
+      else if (f["next-pool"] !== "none") { unknown++; detail("Указан next-pool=" + f["next-pool"] + "; цепочки пулов не анализируются."); }
+      return true;
+    });
+    output.push("", "DHCP-серверы:");
+    var servers = sections["DHCP-серверы"];
+    if (!servers || servers.error || servers.invalid) { output.push("  Раздел отсутствует, не прочитан или неоднозначен; оценка невозможна."); unknown++; }
+    else {
+      if (servers.truncated) { output.push("  Раздел усечён: показана только часть серверов."); unknown++; }
+      if (!iface) { output.push("  LAN-интерфейс не указан; сопоставление серверов не выполняется."); unknown++; }
+      var ambiguous = 0, matching = 0, unknownState = 0;
+      servers.rows.forEach(function (row) {
+        var f = lanParseRow(row, ["name","interface","address-pool","disabled","invalid","dynamic"]);
+        if (!f || !f.interface || f.interface === "—") { ambiguous++; return; }
+        if (!known(f.disabled) || !known(f.invalid)) unknownState++;
+        if (iface && f.interface === iface) { matching++; count++; detail("На указанном интерфейсе: name=" + (f.name || "—") + " · interface=" + f.interface + " · pool=" + (f["address-pool"] || "—") + " · disabled=" + (f.disabled || "—")); }
+      });
+      if (ambiguous) { unknown += ambiguous; output.push("  Серверов с неразобранным/неизвестным интерфейсом: " + ambiguous + "."); }
+      if (unknownState) { unknown += unknownState; output.push("  Серверов с неизвестным состоянием: " + unknownState + "."); }
+      if (iface && !matching) output.push("  Прямого совпадения интерфейса в распознанных записях не показано.");
+      output.push("  Серверы на других интерфейсах и bridge-портах тоже могут влиять на LAN; топология не проверялась.");
+    }
+    if (omitted) output.push("", "Вывод ограничен 200 подробными строками; не показано: " + omitted + ".");
+    output.push("", "Найдено пересечений/совпадений: " + count + "; неопределённых случаев или разделов: " + unknown + ".",
+      "Не проверяются все маршруты, bridge/VLAN, firewall, аренды DHCP, DNS, клиенты, статические IP, IPv6, связанные сервисы и текущее состояние. Отключённые и динамические записи не исключаются.",
+      "Совпадение может быть штатным, а отсутствие предупреждений не доказывает безопасности или отсутствия конфликтов. Данные не атомарны. Автоматическое применение LAN остаётся заблокировано; возможна потеря доступа.");
+    return output.join("\n");
+  }
+  function resetLanCheck() {
+    lanCheckSeq++; lanCheckText = ""; $("lan-check-output").textContent = "";
+    $("lan-check-run").disabled = !($("lan-check-file").files.length && $("lan-check-address").value.trim());
+    $("lan-check-copy").disabled = true; $("lan-check-download").disabled = true;
+  }
+  $("lan-check-file").addEventListener("change", resetLanCheck);
+  ["lan-check-address", "lan-check-interface"].forEach(function (id) { $(id).addEventListener("input", resetLanCheck); $(id).addEventListener("change", resetLanCheck); });
+  $("lan-check-run").addEventListener("click", function () {
+    var file = $("lan-check-file").files[0], addr = $("lan-check-address").value, iface = $("lan-check-interface").value;
+    if (!file || !addr.trim() || this.disabled) return;
+    var seq = ++lanCheckSeq, btn = this; lanCheckText = ""; btn.disabled = true;
+    $("lan-check-copy").disabled = true; $("lan-check-download").disabled = true; $("lan-check-output").textContent = "Чтение снимка…";
+    readComparisonFile(file).then(function (text) {
+      if (seq !== lanCheckSeq) return; lanCheckText = inspectLanSnapshot(text, addr, iface); $("lan-check-output").textContent = lanCheckText;
+      $("lan-check-copy").disabled = false; $("lan-check-download").disabled = false;
+    }).catch(function (e) { if (seq === lanCheckSeq) $("lan-check-output").textContent = "Ошибка: " + (e.message || "не удалось проверить снимок"); })
+      .finally(function () { if (seq === lanCheckSeq) btn.disabled = !($("lan-check-file").files.length && $("lan-check-address").value.trim()); });
+  });
+  $("lan-check-copy").addEventListener("click", function () {
+    if (!lanCheckText) return; var btn = this;
+    copyText(lanCheckText).then(function () { flash(btn, "Скопировано ✓"); }).catch(function () { showError("Не удалось скопировать результат"); });
+  });
+  $("lan-check-download").addEventListener("click", function () {
+    if (!lanCheckText) return; var a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([lanCheckText], {type:"text/plain;charset=utf-8"})); a.download = "mikrotik-lan-snapshot-check.txt";
+    document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 0); flash(this, "Файл сохранён ✓");
+  });
 
   loadPrefs();
   showTab("info");

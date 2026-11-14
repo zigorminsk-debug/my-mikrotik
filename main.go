@@ -25,7 +25,7 @@ import (
 
 // version подставляется при релизной сборке через -ldflags "-X main.version=...".
 // Версия отображается в приложении и используется для CI-артефактов.
-var version = "0.2.17"
+var version = "0.2.18"
 
 func main() {
 	closeLog := initLogging()
