@@ -610,6 +610,8 @@
                 <div id="geo-status" class="sec-note">Страны можно не выбирать, если указаны отдельные адреса.</div>
                 <div class="actions"><button type="button" class="ghost" id="geo-check">Проверить существующий dst-nat (без изменений)</button></div>
                 <div id="geo-check-output" class="sec-note" aria-live="polite"></div>
+                <label class="checkbox"><input type="checkbox" id="geo-unknown-status"> Статус dst-nat не получен: я проверил правило вручную и разрешаю применение без подтверждения его включённого состояния</label>
+                <div class="sec-note">Используйте только если проверка сообщает «disabled не получено». Программа не сможет подтвердить, включён ли проброс; если он выключен, доступ не заработает. Остальные проверки и предупреждение о возможных изменениях firewall сохраняются.</div>
                 <label class="checkbox"><input type="checkbox" id="geo-ack"> Я проверил ресурс, WAN-интерфейс и сохранил резервную копию</label>
                 <div class="sec-note">Выключите другие разделы: это отдельный скрипт для одного существующего dst-nat, он не создаёт проброс. Правила затрагивают только выбранный WAN, внутренний IPv4, порт и протокол; их accept имеет приоритет над существующими правилами. Все пробросы на этот внутренний адрес и порт через выбранный WAN попадут под правило, независимо от внешнего порта. IPv6, непроброшенные соединения и другие WAN не защищены. Уже работающие FastTrack-соединения могут сохраняться до очистки conntrack. Для каждого другого ресурса используйте отдельный идентификатор. Страны определяются по RIR-делегированию адресов: геолокация приблизительная, VPN/proxy её обходят. Обновляйте список вручную (кэш данных — 12 часов). Кнопка «Применить» проверяет устройство и наличие подходящего dst-nat перед изменением правил; она доступна для RouterOS 7 по API/REST при размере скрипта до 64 КиБ. Проверка не доказывает достижимость сервиса и не обеспечивает автоматический откат. Для MAC и больших скриптов доступен .rsc. Safe Mode не рассчитан на тысячи изменений.</div>
               </div>
@@ -906,6 +908,7 @@
     if (!lastInfo && connectedKey === null) return;
     if (force !== true && connectedKey !== null && connectedKey === connectionKey()) return;
     connectedKey = null;
+    $("geo-unknown-status").checked = false;
     clearGeoCheck();
     clearLiveLANPlan();
     clearNetworkSnapshot();
@@ -1363,6 +1366,7 @@
   // предпросмотр скрипта
   // ------------------------------------------------------------------
   function schedulePreview() {
+    $("geo-unknown-status").checked = false;
     clearGeoCheck();
     clearLiveLANPlan();
     clearTimeout(previewTimer);
@@ -1588,6 +1592,7 @@
   // подключение и загрузка данных
   // ------------------------------------------------------------------
   function loadInterfaces() {
+    $("geo-unknown-status").checked = false;
     clearGeoCheck();
     clearLiveLANPlan();
     var device = lastInfo;
@@ -2138,9 +2143,11 @@
     var geo = chk("chk-geoNat"), radius = chk("chk-pppRadius");
     if (applyInProgress || !currentScript || chk("chk-security") || (geo && geoApplyIssue()) || (radius && radiusApplyIssue()) || (!radius && currentScript.indexOf("# MTI-PPP-RADIUS-GUARDED-APPLY") !== -1) || (!geo && currentScript.indexOf("# MTI-GEONAT-GUARDED-APPLY") !== -1) || currentScript.indexOf("# MTI-USB-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-LAN-PREVIEW-ONLY") !== -1 || currentScript.indexOf("# MTI-PPP-RADIUS-PREVIEW-ONLY") !== -1) return;
     var host = $("host").value.trim();
+    var allowUnknownNatStatus = geo && chk("geo-unknown-status");
     var prompt = geo ? (
       "Применить белый список NAT на " + host + "?\n\n" +
       "Программа проверит устройство и существующий dst-nat для " + currentGeoPreview.geoNat.destination + ":" + currentGeoPreview.geoNat.port + " через " + currentGeoPreview.geoNat.wan + ".\n" +
+      (allowUnknownNatStatus ? "ВНИМАНИЕ: если статус disabled не получен, применение будет продолжено без подтверждения включённого состояния dst-nat. Вы проверили его вручную?\n" : "") +
       "Будут добавлены список адресов и правила в начале forward. Правило accept разрешает доверенные адреса выше существующего firewall; остальные блокируются. Все пробросы на этот адрес и порт через WAN подпадают под правила.\n" +
       "IPv6 и сервисы роутера не защищены; действующие FastTrack/соединения могут сохраняться. Сбой может оставить частичные изменения; автоматического отката нет.\n\n" +
       "Резервная копия сохранена и локальный доступ доступен?"
@@ -2174,7 +2181,7 @@
 
     var applyConn = connPayload();
     applyConn.protocol = lastInfo.protocol || applyConn.protocol;
-    var body = geo ? {conn:applyConn, device:applyGeo.device, interfaces:applyGeo.interfaces, geoNat:applyGeo.geoNat, generatedAt:applyGeo.generatedAt, script:applySource} : radius ? {conn:applyConn, device:applyRadius.device, interfaces:applyRadius.interfaces, pppRadius:applyRadius.pppRadius, generatedAt:applyRadius.generatedAt, script:applySource} : {conn:applyConn, script:applySource};
+    var body = geo ? {conn:applyConn, device:applyGeo.device, interfaces:applyGeo.interfaces, geoNat:applyGeo.geoNat, generatedAt:applyGeo.generatedAt, script:applySource, allowUnknownNatStatus:allowUnknownNatStatus} : radius ? {conn:applyConn, device:applyRadius.device, interfaces:applyRadius.interfaces, pppRadius:applyRadius.pppRadius, generatedAt:applyRadius.generatedAt, script:applySource} : {conn:applyConn, script:applySource};
     fetch(geo ? "/api/geonat/apply" : radius ? "/api/ppp-radius/apply" : "/api/apply", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2194,7 +2201,7 @@
           return;
         }
         if (geo) {
-          okBox.textContent = "Команда белого списка завершилась без ошибки на " + host + ". Проверьте созданные правила в WinBox и новые соединения: приложение не проверяет реальную защиту или доступность сервиса.";
+          okBox.textContent = "Команда белого списка завершилась без ошибки на " + host + ". " + (allowUnknownNatStatus ? "Включённое состояние dst-nat могло не быть подтверждено. " : "") + "Проверьте созданные правила в WinBox и новые соединения: приложение не проверяет реальную защиту или доступность сервиса.";
           setScriptState("проверить правила", "good");
           return;
         }

@@ -10,11 +10,11 @@ function between(start,end) {
   return html.slice(a,b);
 }
 function setup() {
-  const names=['btn-copy','btn-download','btn-apply','apply-reason','build-ok','build-error','host'];
+  const names=['btn-copy','btn-download','btn-apply','apply-reason','build-ok','build-error','host','geo-unknown-status'];
   const el=Object.fromEntries(names.map(id=>[id,{disabled:false,style:{display:'none'},textContent:'',innerHTML:'', value:'192.0.2.1', addEventListener(type,fn){this.handler=fn}}]));
   let resolveFetch, requests=0, geo=false, radiusOn=false, state='', lastRequest=null;
   const ctx=vm.createContext({
-    $:id=>el[id], chk:id=>(id==='chk-geoNat'&&geo)||(id==='chk-pppRadius'&&radiusOn), applyInProgress:false, Blob, currentGeoPreview:null, currentRadiusPreview:null,
+    $:id=>el[id], chk:id=>(id==='chk-geoNat'&&geo)||(id==='chk-pppRadius'&&radiusOn)||(id==='geo-unknown-status'&&!!el[id].checked), applyInProgress:false, Blob, currentGeoPreview:null, currentRadiusPreview:null,
     currentScript:':put 1', connectedKey:'key', lastInfo:{protocol:'api',routeros:'7.25.1'}, interfacesReady:true, previewSeq:1, previewTimer:null,
     connectionKey:()=> 'key', connPayload:()=>({host:'192.0.2.1'}),
     setScriptState:s=>{state=s}, protoLabel:p=>p, window:{confirm:()=>true},
@@ -67,6 +67,16 @@ const settle=()=>new Promise(r=>setImmediate(r));
     assert.equal(/настройки этим запросом не изменены/.test(f.el['build-error'].textContent),safe);
     assert.equal(/могли примениться частично/.test(f.el['build-error'].textContent),!safe);
   }
+
+  const unknown=setup(); unknown.selectGeo(); unknown.ctx.currentScript='# MTI-GEONAT-GUARDED-APPLY';
+  unknown.ctx.currentGeoPreview={device:unknown.ctx.lastInfo,interfaces:[],geoNat:{destination:'192.168.88.50',port:'3389',wan:'ether1'},generatedAt:'2026-11-13T00:00:00Z'};
+  unknown.el['geo-unknown-status'].checked=true;
+  let warning=''; unknown.ctx.window.confirm=msg=>{warning=msg;return true};
+  unknown.el['btn-apply'].handler.call(unknown.el['btn-apply']);
+  assert.equal(unknown.request().body.allowUnknownNatStatus,true); assert.match(warning,/без подтверждения включённого состояния/);
+  unknown.resolve({json:()=>Promise.resolve({ok:true,protocol:'api'})}); await settle();await settle();
+  assert.match(unknown.el['build-ok'].textContent,/могло не быть подтверждено/);
+  unknown.ctx.schedulePreview();assert.equal(unknown.el['geo-unknown-status'].checked,false);
 
   const radius=setup(); radius.selectRadius(); radius.ctx.currentScript='# MTI-PPP-RADIUS-GUARDED-APPLY\n:put 1';
   radius.ctx.currentRadiusPreview={device:radius.ctx.lastInfo,interfaces:[],pppRadius:{address:'192.0.2.10',secret:'private'},generatedAt:'2026-11-13T00:00:00Z'};

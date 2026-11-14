@@ -415,6 +415,7 @@ func TestGeoNATApplyHTTPPreviewAndGuard(t *testing.T) {
 	var requests []string
 	var saved string
 	var failRun bool
+	var omitDisabled bool
 	router := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
 		switch r.Method + " " + r.URL.Path {
@@ -429,7 +430,11 @@ func TestGeoNATApplyHTTPPreviewAndGuard(t *testing.T) {
 		case "GET /rest/ip/firewall/filter":
 			fmt.Fprint(w, `[]`)
 		case "GET /rest/ip/firewall/nat":
-			fmt.Fprint(w, `[{"chain":"dstnat","action":"dst-nat","disabled":false,"protocol":"tcp","to-addresses":"192.168.88.5","to-ports":"3389","in-interface":"ether1"}]`)
+			if omitDisabled {
+				fmt.Fprint(w, `[{"chain":"dstnat","action":"dst-nat","protocol":"tcp","to-addresses":"192.168.88.5","to-ports":"3389","in-interface":"ether1"}]`)
+			} else {
+				fmt.Fprint(w, `[{"chain":"dstnat","action":"dst-nat","disabled":false,"protocol":"tcp","to-addresses":"192.168.88.5","to-ports":"3389","in-interface":"ether1"}]`)
+			}
 		case "GET /rest/system/script":
 			fmt.Fprint(w, `[]`)
 		case "POST /rest/system/script/remove":
@@ -499,6 +504,17 @@ func TestGeoNATApplyHTTPPreviewAndGuard(t *testing.T) {
 			t.Fatalf("check wrote: %v", requests)
 		}
 	}
+	omitDisabled = true
+	post("/api/geonat/apply", req, &out)
+	if out.OK || out.Stage != "preflight" || !strings.Contains(out.Error, "disabled не получено") {
+		t.Fatalf("missing state: %+v", out)
+	}
+	for _, c := range requests {
+		if !strings.HasPrefix(c, "GET ") {
+			t.Fatalf("unexpected write: %v", requests)
+		}
+	}
+	req.AllowUnknownNATStatus = true
 	post("/api/geonat/apply", req, &out)
 	if !out.OK || saved != preview.Script {
 		t.Fatalf("apply=%+v, script match=%t; requests=%v", out, saved == preview.Script, requests)

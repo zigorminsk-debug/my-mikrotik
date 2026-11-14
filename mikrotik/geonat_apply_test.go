@@ -129,6 +129,11 @@ func TestGeoNATRESTPreflightAndApply(t *testing.T) {
 		{"invalid", "router", `[{"chain":"dstnat","action":"dst-nat","disabled":false,"invalid":true,"protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3389","in-interface":"ether1"}]`, false, "invalid", 0},
 		{"disabled-missing-after-proplist", "router", `[{"chain":"dstnat","action":"dst-nat","protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3389","in-interface":"ether1"}]`, false, "disabled не получено", 0},
 		{"disabled-true", "router", `[{"chain":"dstnat","action":"dst-nat","disabled":true,"protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3389","in-interface":"ether1"}]`, false, "выключено", 0},
+		{"override-missing", "router", `[{"chain":"dstnat","action":"dst-nat","protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3389","in-interface":"ether1"}]`, false, "", 3},
+		{"override-disabled", "router", `[{"chain":"dstnat","action":"dst-nat","disabled":true,"protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3389","in-interface":"ether1"}]`, false, "выключено", 0},
+		{"override-unknown-value", "router", `[{"chain":"dstnat","action":"dst-nat","disabled":"maybe","protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3389","in-interface":"ether1"}]`, false, "неизвестное значение disabled", 0},
+		{"override-invalid", "router", `[{"chain":"dstnat","action":"dst-nat","invalid":true,"protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3389","in-interface":"ether1"}]`, false, "invalid", 0},
+		{"override-port-mismatch", "router", `[{"chain":"dstnat","action":"dst-nat","protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3390","in-interface":"ether1"}]`, false, "порт не совпал", 0},
 		{"no-nat", "router", `[]`, false, "не найден", 0},
 		{"identity-changed", "other", `[]`, false, "изменились", 0},
 		{"run-error", "router", `[{"chain":"dstnat","action":"dst-nat","disabled":false,"protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3389","in-interface":"ether1"}]`, true, "частично", 3},
@@ -187,6 +192,7 @@ func TestGeoNATRESTPreflightAndApply(t *testing.T) {
 			_, sp, _ := net.SplitHostPort(u.Host)
 			port, _ := strconv.Atoi(sp)
 			req := makeGeoRequest(port)
+			req.AllowUnknownNATStatus = strings.HasPrefix(tc.name, "override-")
 			if len(req.Script) >= maxScriptSize {
 				t.Fatal("106 prefix fixture unexpectedly too large")
 			}
@@ -264,7 +270,7 @@ func TestGeoNATAPISameSessionNoRetry(t *testing.T) {
 	}{
 		{"success", true, false, 3, "false", false}, {"no-nat", false, false, 0, "", false}, {"run-error", true, true, 3, "false", false},
 		{"disabled", true, false, 0, "true", false}, {"unknown", true, false, 0, "", false},
-		{"read-only", true, false, 0, "false", true},
+		{"read-only", true, false, 0, "false", true}, {"override-unknown", true, false, 3, "", false}, {"override-disabled", true, false, 0, "true", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -335,6 +341,7 @@ func TestGeoNATAPISameSessionNoRetry(t *testing.T) {
 			}()
 			req := makeGeoRequest(0)
 			req.Geo.Destination = "192.168.88.50"
+			req.AllowUnknownNATStatus = strings.HasPrefix(tc.name, "override-")
 			req.Conn.Protocol = "api"
 			req.Conn.APIPort = ln.Addr().(*net.TCPAddr).Port
 			req.Device.Protocol = "api"
@@ -348,7 +355,7 @@ func TestGeoNATAPISameSessionNoRetry(t *testing.T) {
 			} else {
 				var proto string
 				proto, err = ApplyGeoNAT(context.Background(), req)
-				if tc.nat && tc.disabled == "false" && !tc.runError {
+				if tc.nat && (tc.disabled == "false" || tc.disabled == "" && req.AllowUnknownNATStatus) && !tc.runError {
 					if err != nil || proto != "api" {
 						t.Fatalf("%s %v", proto, err)
 					}

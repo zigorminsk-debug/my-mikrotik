@@ -20,6 +20,8 @@ type GeoApplyRequest struct {
 	Geo         GeoNATSettings `json:"geoNat"`
 	GeneratedAt time.Time      `json:"generatedAt"`
 	Script      string         `json:"script"`
+	// Explicit operator acknowledgement; only applies when the status is absent.
+	AllowUnknownNATStatus bool `json:"allowUnknownNatStatus"`
 }
 
 // Request the status explicitly: some RouterOS print responses omit flag
@@ -136,7 +138,7 @@ func ApplyGeoNAT(ctx context.Context, req GeoApplyRequest) (protocol string, err
 	if err := checkGeoDevice(req.Device, read); err != nil {
 		return "", err
 	}
-	if err := checkGeoNAT(req.Geo, read); err != nil {
+	if err := checkGeoNATWithUnknownStatus(req.Geo, read, req.AllowUnknownNATStatus); err != nil {
 		return "", err
 	}
 	if err := ctx.Err(); err != nil {
@@ -250,6 +252,13 @@ func explicitlyTrue(v string) bool  { return v == "true" || v == "yes" }
 // port dst-nat to a non-local target is accepted. It checks existence, not rule
 // ordering, public reachability, RDP, firewall behavior or endpoint identity.
 func checkGeoNAT(s GeoNATSettings, read snapshotReader) error {
+	return checkGeoNATWithUnknownStatus(s, read, false)
+}
+
+// An explicit operator acknowledgement may permit only an absent disabled
+// value. It never treats the rule as enabled or overrides a positive disabled,
+// malformed status, mismatch, or any other preflight check.
+func checkGeoNATWithUnknownStatus(s GeoNATSettings, read snapshotReader, allowUnknown bool) error {
 	ifs, err := read("/interface")
 	if err != nil {
 		return fmt.Errorf("не удалось проверить WAN-интерфейс; настройки не изменены")
@@ -343,7 +352,9 @@ func checkGeoNAT(s GeoNATSettings, read snapshotReader) error {
 		}
 		if !geoFalse(n["disabled"]) {
 			if n["disabled"] == "" {
-				reasons = append(reasons, "disabled не получено")
+				if !allowUnknown {
+					reasons = append(reasons, "disabled не получено")
+				}
 			} else if geoTrue(n["disabled"]) {
 				reasons = append(reasons, "правило выключено")
 			} else {

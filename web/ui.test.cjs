@@ -42,7 +42,7 @@ assert.match(snapshot, /Не удалось прочитать/);
 assert.match(snapshot, /Не прочитано/);
 assert.match(snapshot, /Записей не найдено/);
 
-const els = Object.fromEntries(['build-body', 'build-need-conn', 'result', 'copy', 'build-ok'].map(id =>
+const els = Object.fromEntries(['build-body', 'build-need-conn', 'result', 'copy', 'build-ok', 'geo-unknown-status'].map(id =>
   [id, {style: {}, classList: {remove() {}}}]));
 Object.assign(ctx, {
   lastInfo: {model: 'old'}, connectedKey: 'old', interfacesReady: true,
