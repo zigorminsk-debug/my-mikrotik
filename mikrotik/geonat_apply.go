@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,44 @@ type GeoApplyRequest struct {
 	Geo         GeoNATSettings `json:"geoNat"`
 	GeneratedAt time.Time      `json:"generatedAt"`
 	Script      string         `json:"script"`
+}
+
+// Request the status explicitly: some RouterOS print responses omit flag
+// properties unless they are requested. Missing values remain unknown.
+const geoNATProperties = "chain,action,disabled,invalid,protocol,to-addresses,to-ports,dst-port,in-interface,in-interface-list"
+
+func geoAPIReader(c *apiClient) snapshotReader {
+	return func(path string) ([]map[string]string, error) {
+		var rows []map[string]string
+		var err error
+		if path == "/ip/firewall/nat" {
+			rows, _, err = c.exec(path+"/print", "=.proplist="+geoNATProperties)
+		} else {
+			rows, _, err = c.exec(path + "/print")
+		}
+		return rows, err
+	}
+}
+func geoRESTReader(ctx context.Context, rc *restClient) snapshotReader {
+	return func(path string) ([]map[string]string, error) {
+		query := ""
+		if path == "/ip/firewall/nat" {
+			query = "?.proplist=" + url.QueryEscape(geoNATProperties)
+		}
+		rows, err := rc.get(ctx, "/rest"+path+query)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]map[string]string, 0, len(rows))
+		for _, row := range rows {
+			m := make(map[string]string, len(row))
+			for k := range row {
+				m[k] = jstr(row, k)
+			}
+			out = append(out, m)
+		}
+		return out, nil
+	}
 }
 
 // GeoPreflightError guarantees that no configuration write was attempted by this request.
@@ -83,10 +122,7 @@ func ApplyGeoNAT(ctx context.Context, req GeoApplyRequest) (protocol string, err
 			return "", fmt.Errorf("не удалось авторизоваться для проверки")
 		}
 		c.opTimeout = 90 * time.Second
-		read = func(path string) ([]map[string]string, error) {
-			recs, _, err := c.exec(path + "/print")
-			return recs, err
-		}
+		read = geoAPIReader(c)
 		run = func() error { return applyAPIClient(c, req.Script) }
 	} else {
 		rc, err := newRESTClient(&p)
@@ -94,21 +130,7 @@ func ApplyGeoNAT(ctx context.Context, req GeoApplyRequest) (protocol string, err
 			return "", err
 		}
 		rc.client.Timeout = 90 * time.Second
-		read = func(path string) ([]map[string]string, error) {
-			recs, err := rc.get(ctx, "/rest"+path)
-			if err != nil {
-				return nil, err
-			}
-			out := make([]map[string]string, 0, len(recs))
-			for _, rec := range recs {
-				m := make(map[string]string, len(rec))
-				for k := range rec {
-					m[k] = jstr(rec, k)
-				}
-				out = append(out, m)
-			}
-			return out, nil
-		}
+		read = geoRESTReader(ctx, rc)
 		run = func() error { return applyRESTClient(ctx, rc, req.Script) }
 	}
 	if err := checkGeoDevice(req.Device, read); err != nil {

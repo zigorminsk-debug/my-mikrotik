@@ -39,10 +39,7 @@ func DiagnoseGeoNAT(ctx context.Context, req GeoApplyRequest) (bool, string, err
 		if err = c.login(p.User, p.Password); err != nil {
 			return false, "", fmt.Errorf("не удалось авторизоваться для проверки")
 		}
-		read = func(path string) ([]map[string]string, error) {
-			rows, _, err := c.exec(path + "/print")
-			return rows, err
-		}
+		read = geoAPIReader(c)
 		if err = checkGeoDevice(d, read); err != nil {
 			return false, "", err
 		}
@@ -54,21 +51,7 @@ func DiagnoseGeoNAT(ctx context.Context, req GeoApplyRequest) (bool, string, err
 		if err != nil {
 			return false, "", fmt.Errorf("не удалось подготовить подключение")
 		}
-		read = func(path string) ([]map[string]string, error) {
-			records, err := rc.get(ctx, "/rest"+path)
-			if err != nil {
-				return nil, err
-			}
-			out := make([]map[string]string, 0, len(records))
-			for _, record := range records {
-				m := map[string]string{}
-				for k := range record {
-					m[k] = jstr(record, k)
-				}
-				out = append(out, m)
-			}
-			return out, nil
-		}
+		read = geoRESTReader(ctx, rc)
 		if err = checkGeoDevice(d, read); err != nil {
 			return false, "", err
 		}

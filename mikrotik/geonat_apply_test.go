@@ -127,6 +127,8 @@ func TestGeoNATRESTPreflightAndApply(t *testing.T) {
 		{"success", "router", `[{"chain":"dstnat","action":"dst-nat","disabled":false,"invalid":false,"protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3389","in-interface":"ether1"}]`, false, "", 3},
 		{"numeric-json", "router", `[{"chain":"dstnat","action":"dst-nat","disabled":0,"invalid":0,"protocol":6,"to-addresses":"192.168.88.50-192.168.88.50","to-ports":"3389-3389","in-interface":"ether1"}]`, false, "", 3},
 		{"invalid", "router", `[{"chain":"dstnat","action":"dst-nat","disabled":false,"invalid":true,"protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3389","in-interface":"ether1"}]`, false, "invalid", 0},
+		{"disabled-missing-after-proplist", "router", `[{"chain":"dstnat","action":"dst-nat","protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3389","in-interface":"ether1"}]`, false, "disabled не получено", 0},
+		{"disabled-true", "router", `[{"chain":"dstnat","action":"dst-nat","disabled":true,"protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3389","in-interface":"ether1"}]`, false, "выключено", 0},
 		{"no-nat", "router", `[]`, false, "не найден", 0},
 		{"identity-changed", "other", `[]`, false, "изменились", 0},
 		{"run-error", "router", `[{"chain":"dstnat","action":"dst-nat","disabled":false,"protocol":"tcp","to-addresses":"192.168.88.50","to-ports":"3389","in-interface":"ether1"}]`, true, "частично", 3},
@@ -151,6 +153,11 @@ func TestGeoNATRESTPreflightAndApply(t *testing.T) {
 				case "GET /rest/ip/firewall/filter":
 					fmt.Fprint(w, `[]`)
 				case "GET /rest/ip/firewall/nat":
+					if r.URL.Query().Get(".proplist") != geoNATProperties {
+						t.Errorf("missing explicit NAT properties: %s", r.URL.RawQuery)
+						w.WriteHeader(400)
+						return
+					}
 					fmt.Fprint(w, tc.nat)
 				case "GET /rest/system/script":
 					fmt.Fprint(w, `[]`)
@@ -252,8 +259,12 @@ func TestGeoNATAPISameSessionNoRetry(t *testing.T) {
 		nat      bool
 		runError bool
 		writes   int
+		disabled string
+		diagnose bool
 	}{
-		{"success", true, false, 3}, {"no-nat", false, false, 0}, {"run-error", true, true, 3},
+		{"success", true, false, 3, "false", false}, {"no-nat", false, false, 0, "", false}, {"run-error", true, true, 3, "false", false},
+		{"disabled", true, false, 0, "true", false}, {"unknown", true, false, 0, "", false},
+		{"read-only", true, false, 0, "false", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -295,8 +306,18 @@ func TestGeoNATAPISameSessionNoRetry(t *testing.T) {
 					case "/ip/firewall/filter/print":
 						_ = writeSentence(conn, "!done")
 					case "/ip/firewall/nat/print":
+						if len(words) != 2 || words[1] != "=.proplist="+geoNATProperties {
+							t.Errorf("missing NAT proplist: %v", words)
+							_ = writeSentence(conn, "!trap", "=message=missing properties")
+							_ = writeSentence(conn, "!done")
+							continue
+						}
 						if tc.nat {
-							_ = writeSentence(conn, "!re", "=chain=dstnat", "=action=dst-nat", "=disabled=false", "=protocol=6", "=to-addresses=192.168.88.50", "=to-ports=3389", "=in-interface=ether1", "=comment=mti-forward-0-wan")
+							fields := []string{"!re", "=chain=dstnat", "=action=dst-nat", "=protocol=6", "=to-addresses=192.168.88.50", "=to-ports=3389", "=in-interface=ether1"}
+							if tc.disabled != "" {
+								fields = append(fields, "=disabled="+tc.disabled)
+							}
+							_ = writeSentence(conn, fields...)
 						}
 						_ = writeSentence(conn, "!done")
 					case "/system/script/print", "/system/script/remove", "/system/script/add":
@@ -319,13 +340,21 @@ func TestGeoNATAPISameSessionNoRetry(t *testing.T) {
 			req.Device.Protocol = "api"
 			// Protocol is not used in script header; regenerate to preserve exact preview.
 			req.Script = Generate(req.Device, req.Interfaces, &Settings{GeoNAT: req.Geo}, req.GeneratedAt).Script
-			proto, err := ApplyGeoNAT(context.Background(), req)
-			if tc.nat && !tc.runError {
-				if err != nil || proto != "api" {
-					t.Fatalf("%s %v", proto, err)
+			if tc.diagnose {
+				matched, _, e := DiagnoseGeoNAT(context.Background(), req)
+				if e != nil || !matched {
+					t.Fatalf("diagnose %t %v", matched, e)
 				}
-			} else if err == nil {
-				t.Fatal("expected failure")
+			} else {
+				var proto string
+				proto, err = ApplyGeoNAT(context.Background(), req)
+				if tc.nat && tc.disabled == "false" && !tc.runError {
+					if err != nil || proto != "api" {
+						t.Fatalf("%s %v", proto, err)
+					}
+				} else if err == nil {
+					t.Fatal("expected failure")
+				}
 			}
 			if tc.runError && !strings.Contains(err.Error(), "частично") {
 				t.Fatalf("%v", err)
@@ -370,6 +399,11 @@ func TestGeoNATDiagnosticReadOnlyREST(t *testing.T) {
 				case "GET /rest/ip/firewall/filter":
 					fmt.Fprint(w, `[]`)
 				case "GET /rest/ip/firewall/nat":
+					if r.URL.Query().Get(".proplist") != geoNATProperties {
+						t.Errorf("missing explicit NAT properties: %s", r.URL.RawQuery)
+						w.WriteHeader(400)
+						return
+					}
 					fmt.Fprint(w, tc.nat)
 				default:
 					t.Errorf("unexpected call %s %s", r.Method, r.URL.Path)
