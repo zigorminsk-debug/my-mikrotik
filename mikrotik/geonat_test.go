@@ -80,3 +80,43 @@ func TestGeoNATGuardedAndIsolation(t *testing.T) {
 		}
 	}
 }
+
+// The source is tested, not interpreted by RouterOS: physical compatibility
+// and behavior under concurrent administrator changes remain unverified.
+func TestGeoNATAvoidsMovingBeforeBuiltinAndChecksOrder(t *testing.T) {
+	dev := &Info{RouterOS: "7.25.1", Packages: []Package{{Name: "routeros"}}}
+	s := GeoNATSettings{Enabled: true, Resource: "by", WAN: "ether1", Destination: "192.168.88.50", Port: "3389", Protocol: "tcp", Manual: "203.0.113.1", Acknowledged: true}
+	r := Generate(dev, []Iface{{Name: "ether1"}}, &Settings{GeoNAT: s}, time.Unix(1, 0))
+	if !r.OK {
+		t.Fatal(r.Error)
+	}
+	script := r.Script
+	if strings.Contains(script, "/ip firewall filter move") || strings.Contains(script, "destination=0") {
+		t.Fatal("numeric/builtin move remains")
+	}
+	for _, v := range []string{"find where dynamic=no", "dynamic=yes and chain=forward and action!=passthrough", "place-before=($mtiGeoAnchor->0)", "NAT whitelist order not confirmed", "($mtiGeoOrder->0) != ($mtiGeoDrop->0)", "($mtiGeoOrder->1) != ($mtiGeoAllow->0)"} {
+		if !strings.Contains(script, v) {
+			t.Fatalf("missing %q", v)
+		}
+	}
+	position := strings.Index(script, ":if ([:len $mtiGeoAnchor] > 0)")
+	end := strings.Index(script[position:], "\n")
+	line := script[position : position+end]
+	if strings.Count(line, "place-before=($mtiGeoAnchor->0)") != 2 || !strings.Contains(line, "} else={") {
+		t.Fatalf("missing anchored and empty branches: %s", line)
+	}
+	branches := strings.SplitN(line, "} else={", 2)
+	for _, branch := range branches {
+		drop := strings.Index(branch, "action=drop")
+		allow := strings.Index(branch, "action=accept")
+		if drop < 0 || allow < drop {
+			t.Fatalf("drop must be created before allow: %s", branch)
+		}
+	}
+	if strings.Index(script, "dynamic forward rules require manual review") > strings.Index(script, "/ip firewall address-list add") {
+		t.Fatal("dynamic guard after write")
+	}
+	if strings.Index(script, "NAT whitelist order not confirmed") > strings.Index(script, "/ip firewall filter remove") {
+		t.Fatal("cleanup before placement verification")
+	}
+}

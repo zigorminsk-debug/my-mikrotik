@@ -48,6 +48,9 @@ func TestGeoNATPreflight(t *testing.T) {
 		{"own-complete", func(_ GeoNATSettings, d map[string][]map[string]string) {
 			d["/ip/firewall/filter"] = []map[string]string{{"comment": "mti-nat-a0680e7d85c72ada-x-allow", "chain": "forward", "disabled": "false", "action": "accept", "in-interface": "ether1", "dst-address": "192.168.88.50", "protocol": "tcp", "dst-port": "3389"}, {"comment": "mti-nat-a0680e7d85c72ada-x-drop", "chain": "forward", "disabled": "false", "action": "drop", "in-interface": "ether1", "dst-address": "192.168.88.50", "protocol": "tcp", "dst-port": "3389"}}
 		}, true},
+		{"partial-managed-allow", func(g GeoNATSettings, d map[string][]map[string]string) {
+			d["/ip/firewall/filter"] = []map[string]string{{"comment": "mti-nat-a0680e7d85c72ada-7b0db52842-allow", "chain": "forward", "disabled": "false", "action": "accept", "in-interface": "ether1", "dst-address": g.Destination, "protocol": "tcp", "dst-port": "3389"}}
+		}, false},
 		{"own-incomplete", func(_ GeoNATSettings, d map[string][]map[string]string) {
 			d["/ip/firewall/filter"] = []map[string]string{{"comment": "mti-nat-a0680e7d85c72ada-x-allow", "chain": "forward", "disabled": "false", "action": "accept", "in-interface": "ether1", "dst-address": "192.168.88.50", "protocol": "tcp", "dst-port": "3389"}}
 		}, false},
@@ -547,5 +550,19 @@ func TestGeoNATAPIStatusPartition(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestGeoNATUserPartialBYStopsBeforeWrite(t *testing.T) {
+	g, data := geoFixture()
+	g.Resource = "by"
+	data["/ip/firewall/filter"] = []map[string]string{
+		{"dynamic": "true", "chain": "forward", "action": "passthrough"},
+		{"comment": "mti-nat-a7e2d26e8d15814d-7b0db52842-allow", "chain": "forward", "action": "accept", "disabled": "false", "in-interface": "ether1", "dst-address": "192.168.88.50", "protocol": "tcp", "dst-port": "3389"},
+	}
+	read := func(path string) ([]map[string]string, error) { return data[path], nil }
+	err := checkGeoNAT(g, read)
+	if err == nil || !strings.Contains(err.Error(), "неполный") {
+		t.Fatalf("partial accepted: %v", err)
 	}
 }

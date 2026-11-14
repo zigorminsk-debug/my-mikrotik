@@ -143,16 +143,24 @@ func writeGeoNAT(b *strings.Builder, s GeoNATSettings, now time.Time) {
 	if len(s.Countries) > 0 {
 		fmt.Fprintf(b, "# Страны: %s; источник ipverse/country-ip-blocks.\n", strings.Join(s.Countries, ","))
 	}
-	fmt.Fprintf(b, ":if ([:len [/ip firewall address-list find where list=%s]] > 0 || [:len [/ip firewall filter find where comment=%s]] > 0) do={ :error \"this NAT whitelist script was already applied; regenerate\" }\n", rosQuote(tag), rosQuote(tag+"-drop"))
+	fmt.Fprintf(b, ":if ([:len [/ip firewall address-list find where list=%s]] > 0 || [:len [/ip firewall filter find where comment=%s]] > 0 || [:len [/ip firewall filter find where comment=%s]] > 0) do={ :error \"this NAT whitelist script was already applied; regenerate\" }\n", rosQuote(tag), rosQuote(tag+"-drop"), rosQuote(tag+"-allow"))
+	b.WriteString(":if ([:len [/ip firewall filter find where dynamic=yes and chain=forward and action!=passthrough]] > 0) do={ :error \"dynamic forward rules require manual review\" }\n")
 	for _, addr := range addresses {
 		fmt.Fprintf(b, "/ip firewall address-list add %s %s %s\n", attr("list", list), attr("address", addr), attr("comment", tag))
 	}
 	match := strings.Join([]string{"chain=forward", attr("in-interface", s.WAN), "connection-nat-state=dstnat", attr("dst-address", s.Destination), attr("protocol", s.Protocol), attr("dst-port", s.Port)}, " ")
-	// Insert accept first and then drop, both ahead of existing accept/fasttrack rules.
-	fmt.Fprintf(b, "/ip firewall filter add %s %s action=accept %s\n", match, attr("src-address-list", list), attr("comment", tag+"-allow"))
-	fmt.Fprintf(b, "/ip firewall filter move [find where comment=%s] destination=0\n", rosQuote(tag+"-allow"))
-	fmt.Fprintf(b, "/ip firewall filter add %s src-address-list=!%s action=drop %s\n", match, list, attr("comment", tag+"-drop"))
-	fmt.Fprintf(b, "/ip firewall filter move [find where comment=%s] destination=0\n", rosQuote(tag+"-drop"))
+	// Insert directly before the first static item: RouterOS can reject attempts
+	// to move ahead of the dynamic FastTrack dummy, and numeric destination=0
+	// is not a stable identifier. Populate the list first; put drop then allow
+	// before the same anchor, so a partial failure does not leave only allow.
+	drop := fmt.Sprintf("/ip firewall filter add %s src-address-list=!%s action=drop %s", match, list, attr("comment", tag+"-drop"))
+	allow := fmt.Sprintf("/ip firewall filter add %s %s action=accept %s", match, attr("src-address-list", list), attr("comment", tag+"-allow"))
+	b.WriteString(":local mtiGeoAnchor [/ip firewall filter find where dynamic=no]\n")
+	fmt.Fprintf(b, ":if ([:len $mtiGeoAnchor] > 0) do={ %s place-before=($mtiGeoAnchor->0); %s place-before=($mtiGeoAnchor->0) } else={ %s; %s }\n", drop, allow, drop, allow)
+	fmt.Fprintf(b, ":local mtiGeoDrop [/ip firewall filter find where comment=%s]\n", rosQuote(tag+"-drop"))
+	fmt.Fprintf(b, ":local mtiGeoAllow [/ip firewall filter find where comment=%s]\n", rosQuote(tag+"-allow"))
+	b.WriteString(":local mtiGeoOrder [/ip firewall filter find where dynamic=no]\n")
+	b.WriteString(":if ([:len $mtiGeoDrop] != 1 || [:len $mtiGeoAllow] != 1 || [:len $mtiGeoOrder] < 2 || ($mtiGeoOrder->0) != ($mtiGeoDrop->0) || ($mtiGeoOrder->1) != ($mtiGeoAllow->0) || [:len [/ip firewall filter find where dynamic=yes and chain=forward and action!=passthrough]] > 0) do={ :error \"NAT whitelist order not confirmed; check firewall manually\" }\n")
 	// Remove only older objects owned by this resource after new rules are live.
 	fmt.Fprintf(b, "/ip firewall filter remove [find where comment~%s and comment!=%s and comment!=%s]\n", rosQuote("^"+prefix), rosQuote(tag+"-allow"), rosQuote(tag+"-drop"))
 	fmt.Fprintf(b, "/ip firewall address-list remove [find where comment~%s and comment!=%s]\n", rosQuote("^"+prefix), rosQuote(tag))
