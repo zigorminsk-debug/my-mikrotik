@@ -16,7 +16,7 @@ import (
 	"github.com/zigorminsk-debug/my-mikrotik/mikrotik"
 )
 
-var version = "0.2.0-fyne"
+var version = "0.3.0-fyne"
 
 func main() {
 	a := app.NewWithID("org.mikrotik.inspector.fyne")
@@ -40,8 +40,8 @@ func main() {
 	out := widget.NewMultiLineEntry()
 	out.Wrapping = fyne.TextWrapOff
 	out.Disable()
-	out.SetText("Подключитесь к роутеру. Вкладка GeoNAT поддерживает проверку и предпросмотр; применение ещё не перенесено.")
-	status := widget.NewLabel("Только чтение и локальный предпросмотр. Экспериментальная версия без HTML и Edge.")
+	out.SetText("Подключитесь к роутеру. Вкладка GeoNAT поддерживает проверку, предпросмотр и применение с подтверждением.")
+	status := widget.NewLabel("Диагностика не меняет настройки; GeoNAT можно применить после подтверждения. Экспериментальная версия без HTML и Edge.")
 	status.Wrapping = fyne.TextWrapWord
 	var info *mikrotik.Info
 	var connected mikrotik.Params
@@ -239,7 +239,7 @@ func main() {
 	form := widget.NewForm(widget.NewFormItem("Адрес", host), widget.NewFormItem("Порт", port), widget.NewFormItem("Логин", user), widget.NewFormItem("Пароль", password), widget.NewFormItem("Протокол", protocol))
 	controls := container.NewVBox(widget.NewLabelWithStyle("Подключение к MikroTik", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), form, tls, widget.NewLabel("Без TLS пароль и данные могут передаваться открытым текстом. TLS в этой версии не проверяет сертификат роутера."), connect, widget.NewSeparator(), widget.NewLabel("Необязательные разделы снимка:"), topo, leases, history, lte, snapshot, copyButton, status)
 	out.SetMinRowsVisible(18)
-	getConnection := func() (mikrotik.Params, *mikrotik.Info, bool) { return connected, info, info != nil }
+	getConnection := func() (mikrotik.Params, *mikrotik.Info, bool) { return connected, info, info != nil && !busy }
 	startGeo := func(timeout time.Duration) (context.Context, func() bool) {
 		seq++
 		id := seq
@@ -256,9 +256,13 @@ func main() {
 			return true
 		}
 	}
-	geo = newGeoPanel(getConnection, startGeo)
+	geo = newGeoPanel(getConnection, startGeo, func(title, message string, cb func(bool)) { dialog.ShowConfirm(title, message, cb, w) })
 	w.SetContent(container.NewAppTabs(container.NewTabItem("Диагностика", container.NewHSplit(container.NewVScroll(controls), out)), container.NewTabItem("GeoNAT", geo.root)))
 	w.SetCloseIntercept(func() {
+		if geo != nil && (geo.writing || geo.confirming) {
+			dialog.ShowInformation("GeoNAT", "Завершите подтверждение или дождитесь результата применения; отключение питания или аварийное завершение могут оставить частичные изменения.", w)
+			return
+		}
 		seq++
 		if cancel != nil {
 			cancel()

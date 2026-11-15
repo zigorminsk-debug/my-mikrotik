@@ -1,6 +1,8 @@
 package viewmodel
 
 import (
+	"context"
+	"fmt"
 	"github.com/zigorminsk-debug/my-mikrotik/mikrotik"
 	"strconv"
 	"strings"
@@ -54,3 +56,40 @@ func TestGeoPreviewClipsLongOutput(t *testing.T) {
 	}
 }
 func fmtIP(i int) string { return "192.0.2." + strconv.Itoa(i) + "/32" }
+
+func TestGeoPlanRetainsExactDetachedInputs(t *testing.T) {
+	d := &mikrotik.Info{Protocol: "rest", Identity: "router", RouterOS: "7.25.1", Architecture: "arm", Diagnostics: &mikrotik.IdentityDiagnostics{ResourceBoard: "hAP"}, Packages: []mikrotik.Package{{Name: "routeros"}}}
+	i := []mikrotik.Iface{{Name: "ether1"}}
+	g := mikrotik.GeoNATSettings{Enabled: true, Resource: "by", WAN: "ether1", Destination: "192.168.88.50", Port: "3389", Protocol: "tcp", Countries: []string{"by"}, CountryPrefixes: []string{"192.0.2.0/24"}, Acknowledged: true}
+	plan, err := BuildGeoPlan(d, i, g, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Identity = "other"
+	d.Packages[0].Name = "other"
+	d.Diagnostics.ResourceBoard = "other"
+	i[0].Name = "bad"
+	g.CountryPrefixes[0] = "0.0.0.0/0"
+	g.Countries[0] = "zz"
+	req := plan.Request
+	if req.Device.Identity != "router" || req.Device.Diagnostics.ResourceBoard != "hAP" || req.Interfaces[0].Name != "ether1" || req.Geo.Countries[0] != "by" || req.Geo.CountryPrefixes[0] != "192.0.2.0/24" {
+		t.Fatal("preview not detached")
+	}
+	regenerated := mikrotik.Generate(req.Device, req.Interfaces, &mikrotik.Settings{GeoNAT: req.Geo}, req.GeneratedAt)
+	if regenerated.Script != req.Script {
+		t.Fatal("script/plan mismatch")
+	}
+}
+func TestGeoApplyOutcome(t *testing.T) {
+	if !strings.Contains(GeoApplyOutcome(&mikrotik.GeoPreflightError{Cause: fmt.Errorf("denied")}, context.DeadlineExceeded), "до записи") {
+		t.Fatal("preflight lost")
+	}
+	for _, v := range []string{GeoApplyOutcome(fmt.Errorf("lost"), nil), GeoApplyOutcome(nil, context.DeadlineExceeded)} {
+		if !strings.Contains(v, "частично") || !strings.Contains(v, "не повторяйте") {
+			t.Fatal(v)
+		}
+	}
+	if !strings.Contains(GeoApplyOutcome(nil, nil), "не подтверждает защиту") {
+		t.Fatal("false success claim")
+	}
+}

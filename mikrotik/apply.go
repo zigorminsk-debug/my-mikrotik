@@ -13,7 +13,9 @@ const applyScriptName = "mti-apply"
 // Права скрипта: полный набор, чтобы конфигурация применялась без ограничений.
 const applyScriptPolicy = "ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon"
 
-const maxScriptSize = 64 << 10 // 64 КБ
+// MaxApplyScriptSize is the byte limit of the guarded script transports.
+const MaxApplyScriptSize = 64 << 10
+const maxScriptSize = MaxApplyScriptSize
 
 // After a script creation/run attempt the router's state may have changed,
 // including when the response is lost. Never replay through another protocol.

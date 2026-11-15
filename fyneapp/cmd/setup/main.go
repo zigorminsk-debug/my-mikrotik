@@ -20,7 +20,7 @@ import (
 
 //go:embed payload/MikroTikInspectorFyne.exe
 var payload []byte
-var version = "0.2.0-fyne"
+var version = "0.3.0-fyne"
 
 // The fixed script gets paths via environment variables, never script interpolation.
 // Removal only removes a shortcut still pointing to our executable.
@@ -91,7 +91,7 @@ func main() {
 	dir := filepath.Join(base, "Programs", "MikroTik Inspector Fyne")
 	target := filepath.Join(dir, installer.Executable)
 	title := widget.NewLabelWithStyle("MikroTik Inspector — Fyne", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	description := widget.NewLabel("Экспериментальная версия: подключение и диагностика только для чтения. GeoNAT поддерживает проверку и предпросмотр; применение настроек ещё не перенесено. Существующая версия не изменяется. Установка только для текущего пользователя, без администратора.")
+	description := widget.NewLabel("Экспериментальная версия: подключение и диагностика. GeoNAT поддерживает применение с подтверждением и риском частичных изменений. Большая часть конструктора ещё не перенесена. Существующая версия не изменяется. Установка только для текущего пользователя, без администратора.")
 	description.Wrapping = fyne.TextWrapWord
 	location := widget.NewLabel("Папка: " + dir)
 	location.Wrapping = fyne.TextWrapBreak
