@@ -45,9 +45,36 @@ func shortcut(target string, remove bool) error {
 	}
 	return nil
 }
+
+// Exercise the real embedded payload and managed install/remove logic in isolation.
+func verifyPayload() error {
+	if len(payload) < 2 || payload[0] != 'M' || payload[1] != 'Z' {
+		return fmt.Errorf("payload is not an EXE")
+	}
+	dir, err := os.MkdirTemp("", "mti-fyne-check-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	if err = installer.Install(dir, payload); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(filepath.Join(dir, installer.Executable))
+	if err != nil {
+		return err
+	}
+	if len(data) != len(payload) {
+		return fmt.Errorf("payload length mismatch")
+	}
+	if err = installer.Remove(dir); err != nil {
+		return err
+	}
+	return nil
+}
+
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--verify-payload" {
-		if len(payload) < 2 || payload[0] != 'M' || payload[1] != 'Z' {
+		if err := verifyPayload(); err != nil {
 			os.Exit(2)
 		}
 		return

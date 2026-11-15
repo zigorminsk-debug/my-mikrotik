@@ -23,7 +23,7 @@ func main() {
 	w := a.NewWindow("MikroTik Inspector — Fyne " + version)
 	w.Resize(fyne.NewSize(960, 720))
 	host := widget.NewEntry()
-	host.SetPlaceHolder("192.168.88.1")
+	host.SetPlaceHolder("192.168.88.1 (без http://)")
 	host.SetText("192.168.88.1")
 	port := widget.NewEntry()
 	port.SetPlaceHolder("по умолчанию")
@@ -32,7 +32,7 @@ func main() {
 	password := widget.NewPasswordEntry()
 	protocol := widget.NewSelect([]string{"auto", "api", "rest", "mac"}, nil)
 	protocol.SetSelected("auto")
-	tls := widget.NewCheck("TLS (самоподписанные сертификаты не проверяются)", nil)
+	tls := widget.NewCheck("TLS (сертификаты НЕ проверяются)", nil)
 	topo := widget.NewCheck("Bridge, порты и VLAN", nil)
 	leases := widget.NewCheck("Аренды DHCP: IP, MAC и имена", nil)
 	history := widget.NewCheck("Краткая история mti-failover", nil)
@@ -122,6 +122,10 @@ func main() {
 			return
 		}
 		p := mikrotik.Params{Host: strings.TrimSpace(host.Text), User: strings.TrimSpace(user.Text), Password: password.Text, Protocol: protocol.Selected, TLS: tls.Checked}
+		if strings.Contains(p.Host, "://") {
+			dialog.ShowError(fmt.Errorf("укажите адрес без http:// или https:// и отдельно выберите протокол и TLS"), w)
+			return
+		}
 		if port.Text != "" {
 			n, err := strconv.Atoi(strings.TrimSpace(port.Text))
 			if err != nil || n < 1 || n > 65535 {
@@ -219,7 +223,7 @@ func main() {
 	history.OnChanged = clearReport
 	lte.OnChanged = clearReport
 	form := widget.NewForm(widget.NewFormItem("Адрес", host), widget.NewFormItem("Порт", port), widget.NewFormItem("Логин", user), widget.NewFormItem("Пароль", password), widget.NewFormItem("Протокол", protocol))
-	controls := container.NewVBox(widget.NewLabelWithStyle("Подключение к MikroTik", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), form, tls, connect, widget.NewSeparator(), widget.NewLabel("Необязательные разделы снимка:"), topo, leases, history, lte, snapshot, copyButton, status)
+	controls := container.NewVBox(widget.NewLabelWithStyle("Подключение к MikroTik", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), form, tls, widget.NewLabel("Без TLS пароль и данные могут передаваться открытым текстом. TLS в этой версии не проверяет сертификат роутера."), connect, widget.NewSeparator(), widget.NewLabel("Необязательные разделы снимка:"), topo, leases, history, lte, snapshot, copyButton, status)
 	out.SetMinRowsVisible(18)
 	w.SetContent(container.NewHSplit(container.NewVScroll(controls), out))
 	w.SetCloseIntercept(func() {
