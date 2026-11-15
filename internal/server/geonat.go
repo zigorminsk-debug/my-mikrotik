@@ -66,31 +66,54 @@ func handleGeoPrefixes(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, geoResponse{Error: "некорректный запрос"})
 		return
 	}
-	if len(req.Countries) == 0 || len(req.Countries) > 12 {
-		writeJSON(w, http.StatusBadRequest, geoResponse{Error: "выберите от 1 до 12 стран"})
+
+	prefixes, fetched, invalid, err := loadGeoPrefixes(r.Context(), geoHTTPClient, req.Countries)
+	if err != nil {
+		status := http.StatusBadGateway
+		if invalid {
+			status = http.StatusBadRequest
+		}
+		writeJSON(w, status, geoResponse{Error: err.Error()})
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, geoResponse{OK: true, Countries: req.Countries, Prefixes: prefixes, FetchedAt: fetched.UTC().Format(time.RFC3339)})
+}
+
+// GeoCountryPrefixes loads and validates public IPv4 prefixes without starting an
+// HTTP server. Codes must be lower-case and explicit; no router credentials are sent.
+func GeoCountryPrefixes(ctx context.Context, countries []string) ([]string, time.Time, error) {
+	prefixes, fetched, _, err := loadGeoPrefixes(ctx, geoHTTPClient, countries)
+	return prefixes, fetched, err
+}
+
+func loadGeoPrefixes(ctx context.Context, client *http.Client, countries []string) ([]string, time.Time, bool, error) {
+	if len(countries) == 0 || len(countries) > 12 {
+		return nil, time.Time{}, true, fmt.Errorf("выберите от 1 до 12 стран")
+	}
 	seen := map[string]bool{}
-	result := []string{}
-	oldest := time.Now()
-	for _, code := range req.Countries {
+	for _, code := range countries {
 		if !geoAllowed(code) || seen[code] {
-			writeJSON(w, http.StatusBadRequest, geoResponse{Error: "неизвестная или повторная страна: " + code})
-			return
+			return nil, time.Time{}, true, fmt.Errorf("неизвестная или повторная страна: %s", code)
 		}
 		seen[code] = true
-		prefixes, fetched, err := loadCountry(r.Context(), geoHTTPClient, code)
+	}
+	result := []string{}
+	oldest := time.Now()
+	for _, code := range countries {
+		if err := ctx.Err(); err != nil {
+			return nil, time.Time{}, false, err
+		}
+		prefixes, fetched, err := loadCountry(ctx, client, code)
 		if err != nil {
-			writeJSON(w, http.StatusBadGateway, geoResponse{Error: fmt.Sprintf("не удалось загрузить %s: %v", strings.ToUpper(code), err)})
-			return
+			return nil, time.Time{}, false, fmt.Errorf("не удалось загрузить %s: %v", strings.ToUpper(code), err)
 		}
 		if fetched.Before(oldest) {
 			oldest = fetched
 		}
 		result = append(result, prefixes...)
 		if len(result) > mikrotik.MaxGeoPrefixes {
-			writeJSON(w, http.StatusBadRequest, geoResponse{Error: "слишком много подсетей: выберите меньше стран"})
-			return
+			return nil, time.Time{}, true, fmt.Errorf("слишком много подсетей: выберите меньше стран")
 		}
 	}
 	unique := make(map[string]bool, len(result))
@@ -102,9 +125,9 @@ func handleGeoPrefixes(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sort.Strings(all)
-	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, geoResponse{OK: true, Countries: req.Countries, Prefixes: all, FetchedAt: oldest.UTC().Format(time.RFC3339)})
+	return all, oldest, false, nil
 }
+
 func loadCountry(ctx context.Context, client *http.Client, code string) ([]string, time.Time, error) {
 	if !geoAllowed(code) {
 		return nil, time.Time{}, fmt.Errorf("неизвестный код страны")

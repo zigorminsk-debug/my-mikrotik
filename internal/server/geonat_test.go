@@ -100,3 +100,35 @@ func TestGeoNatLargeConfigRequest(t *testing.T) {
 		t.Fatal("missing last prefix")
 	}
 }
+
+func TestLoadGeoPrefixesValidatesBeforeNetworkAndCopies(t *testing.T) {
+	calls := 0
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		return nil, fmt.Errorf("network should not be used")
+	})}
+	for _, codes := range [][]string{{"by", "by"}, {"by", "../x"}, {}, {"BY"}} {
+		_, _, invalid, err := loadGeoPrefixes(context.Background(), client, codes)
+		if err == nil || !invalid || calls != 0 {
+			t.Fatalf("invalid %v: %v %v calls=%d", codes, invalid, err, calls)
+		}
+	}
+	geoCache.Lock()
+	geoCache.data["by"] = geoCacheEntry{prefixes: []string{"5.44.44.0/24"}, fetched: time.Now()}
+	geoCache.Unlock()
+	defer func() { geoCache.Lock(); delete(geoCache.data, "by"); geoCache.Unlock() }()
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := GeoCountryPrefixes(cancelled, []string{"by"}); err == nil {
+		t.Fatal("cancelled cached request succeeded")
+	}
+	p, _, err := GeoCountryPrefixes(context.Background(), []string{"by"})
+	if err != nil || len(p) != 1 {
+		t.Fatal(p, err)
+	}
+	p[0] = "tampered"
+	p, _, err = GeoCountryPrefixes(context.Background(), []string{"by"})
+	if err != nil || p[0] != "5.44.44.0/24" {
+		t.Fatal("cache mutated", p, err)
+	}
+}
