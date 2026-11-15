@@ -25,10 +25,11 @@ func TestGeoPanelInvalidatesAndGates(t *testing.T) {
 	}
 	g.loadedCodes = []string{"by"}
 	g.loadedPrefixes = []string{"192.0.2.0/24"}
+	g.ack.SetChecked(true)
 	g.output.SetText("old preview")
 	before := g.revision
 	g.countries.SetText("de")
-	if g.revision <= before || len(g.loadedPrefixes) != 0 || g.output.Text != "" {
+	if g.revision <= before || len(g.loadedPrefixes) != 0 || g.output.Text != "" || g.ack.Checked {
 		t.Fatal("country change left stale result")
 	}
 	g.setBusy(true)

@@ -123,14 +123,21 @@ func newGeoPanel(get func() (mikrotik.Params, *mikrotik.Info, bool), start func(
 	g.output.SetMinRowsVisible(14)
 	g.output.Disable()
 	g.status = wrapLabel("Подключитесь и прочитайте интерфейсы. Применение в Fyne пока недоступно.")
-	changed := func(string) { g.clearResult() }
+	invalidateAcknowledgement := func() {
+		if g.ack.Checked {
+			g.ack.SetChecked(false)
+		} else {
+			g.clearResult()
+		}
+	}
+	changed := func(string) { invalidateAcknowledgement() }
 	for _, e := range []*widget.Entry{g.resource, g.destination, g.port, g.manual} {
 		e.OnChanged = changed
 	}
 	g.wan.OnChanged = changed
 	g.protocol.OnChanged = changed
 	g.ack.OnChanged = func(bool) { g.clearResult() }
-	g.countries.OnChanged = func(string) { g.loadedCodes = nil; g.loadedPrefixes = nil; g.clearResult() }
+	g.countries.OnChanged = func(string) { g.loadedCodes = nil; g.loadedPrefixes = nil; invalidateAcknowledgement() }
 	g.refresh = widget.NewButton("Прочитать интерфейсы", func() {
 		p, _, ok := g.get()
 		if !ok {
