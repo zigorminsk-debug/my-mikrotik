@@ -33,27 +33,19 @@ jobs:
           [IO.File]::WriteAllBytes("$PWD/cmd/setup/payload/MikroTikInspectorFyne.exe", [byte[]](77,90))
           go mod tidy
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          foreach ($f in @('go.mod','go.sum')) {
-            $base64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD/$f"))
-            for ($i=0; $i -lt $base64.Length; $i+=1500) { $len=[Math]::Min(1500, $base64.Length-$i); Write-Host ("::notice::LOCK:$f`:$i`:" + $base64.Substring($i,$len)) }
-          }
+          git diff --exit-code -- go.mod go.sum
+          if ($LASTEXITCODE -ne 0) { throw "go.mod/go.sum расходятся с go mod tidy" }
           go test -tags ci ./...
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go vet -tags ci ./...
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Контрольные суммы зависимостей
-        uses: actions/upload-artifact@v7
-        with:
-          name: fyne-module-lock
-          path: |
-            fyneapp/go.mod
-            fyneapp/go.sum
       - name: Собрать Fyne приложение
         working-directory: fyneapp
         shell: pwsh
         env:
           CGO_ENABLED: '1'
         run: |
+          Remove-Item cmd/setup/payload/MikroTikInspectorFyne.exe
           go build -trimpath -ldflags "-s -w -H windowsgui" -o cmd/setup/payload/MikroTikInspectorFyne.exe ./cmd/inspector 2>&1 | Tee-Object -FilePath ../fyne-build-error.txt
           if ($LASTEXITCODE -ne 0) { Get-Content ../fyne-build-error.txt | ForEach-Object { Write-Host "::error::$_" }; exit 1 }
       - name: Собрать Fyne установщик
