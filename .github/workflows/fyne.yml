@@ -1,9 +1,7 @@
 name: Экспериментальная Fyne-версия Windows
+# Автоматические сборки вызываются из CI, чтобы все артефакты были в одном запуске.
 on:
-  push:
-    branches: ["**"]
-  pull_request:
-    branches: [main]
+  workflow_call:
   workflow_dispatch:
 permissions:
   contents: read

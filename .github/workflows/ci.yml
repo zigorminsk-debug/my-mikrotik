@@ -13,6 +13,10 @@ permissions:
   contents: read
 
 jobs:
+  fyne:
+    name: Экспериментальная Fyne-версия Windows
+    uses: ./.github/workflows/fyne.yml
+
   test:
     name: Форматирование, vet и тесты
     runs-on: ubuntu-latest

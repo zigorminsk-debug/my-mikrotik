@@ -76,6 +76,7 @@ Microsoft Edge, в Linux/macOS — браузер по умолчанию.
 
 Свежие сборки также лежат в артефактах запусков (**Actions → запуск → Artifacts**):
 `mikrotik-inspector-v<версия>-windows-setup` содержит только установщик Windows;
+в том же запуске CI `mikrotik-inspector-v<версия>-fyne-windows-setup` — отдельный экспериментальный Fyne-установщик;
 `android-apk` — из workflow «Android APK». GitHub выдаёт артефакт Actions ZIP-архивом:
 распакуйте его и запустите находящийся внутри файл `...-windows-setup.exe`. Для скачивания
 может потребоваться вход в GitHub; срок хранения CI-артефактов — 14 дней.
