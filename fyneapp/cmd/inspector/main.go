@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -13,10 +16,11 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 	"github.com/zigorminsk-debug/my-mikrotik/fyneapp/internal/viewmodel"
+	"github.com/zigorminsk-debug/my-mikrotik/internal/server"
 	"github.com/zigorminsk-debug/my-mikrotik/mikrotik"
 )
 
-var version = "0.3.1-fyne"
+var version = "0.4.0-fyne"
 
 func main() {
 	a := app.NewWithID("org.mikrotik.inspector.fyne")
@@ -257,7 +261,28 @@ func main() {
 		}
 	}
 	geo = newGeoPanel(getConnection, startGeo, func(title, message string, cb func(bool)) { dialog.ShowConfirm(title, message, cb, w) })
-	w.SetContent(container.NewAppTabs(container.NewTabItem("Диагностика", container.NewHSplit(container.NewVScroll(controls), out)), container.NewTabItem("GeoNAT", geo.root)))
+	var store deviceStore
+	if dir, err := os.UserConfigDir(); err == nil {
+		store = server.NewDeviceStore(filepath.Join(dir, "MikroTik Inspector", "devices.json"))
+	}
+	previousProtocol := "auto"
+	var tabs *container.AppTabs
+	devices := newDevicesPanel(store, func(address string) bool {
+		if busy || geo.confirming || geo.writing {
+			return false
+		}
+		fillSavedDevice(address, host, password, protocol, &previousProtocol, invalidate)
+		tabs.SelectIndex(0)
+		return true
+	}, func(title, message string, cb func(bool)) { dialog.ShowConfirm(title, message, cb, w) },
+		func(cb func(fyne.URIReadCloser, error)) { dialog.ShowFileOpen(cb, w) },
+		func(cb func(fyne.URIWriteCloser, error)) {
+			f := dialog.NewFileSave(cb, w)
+			f.SetFileName("mikrotik-devices.json")
+			f.Show()
+		})
+	tabs = container.NewAppTabs(container.NewTabItem("Диагностика", container.NewHSplit(container.NewVScroll(controls), out)), container.NewTabItem("Устройства", devices.root), container.NewTabItem("GeoNAT", geo.root))
+	w.SetContent(tabs)
 	w.SetCloseIntercept(func() {
 		if geo != nil && (geo.writing || geo.confirming) {
 			dialog.ShowInformation("GeoNAT", "Завершите подтверждение или дождитесь результата применения; отключение питания или аварийное завершение могут оставить частичные изменения.", w)
@@ -270,4 +295,20 @@ func main() {
 		w.Close()
 	})
 	w.ShowAndRun()
+}
+
+// Selection is not a connection. Always discard old state, even for the same host.
+func fillSavedDevice(address string, host, password *widget.Entry, protocol *widget.Select, previous *string, invalidate func()) {
+	host.SetText(address)
+	password.SetText("")
+	mac, err := net.ParseMAC(address)
+	if err == nil && len(mac) == 6 {
+		if protocol.Selected != "mac" {
+			*previous = protocol.Selected
+		}
+		protocol.SetSelected("mac")
+	} else if protocol.Selected == "mac" {
+		protocol.SetSelected(*previous)
+	}
+	invalidate()
 }

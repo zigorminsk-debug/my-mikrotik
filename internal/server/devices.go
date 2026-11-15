@@ -181,3 +181,82 @@ func handleDevices(store *DeviceStore) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "revision": newRev, "devices": req.Devices})
 	}
 }
+
+// SavedDevice contains only user-entered metadata, never credentials.
+// Free text may still contain secrets if the user enters them.
+type SavedDevice = savedDevice
+
+var ErrDeviceConflict = errors.New("device list revision conflict")
+var ErrInvalidDevices = errors.New("invalid device list")
+
+// Load returns a detached copy and a revision for optimistic concurrency.
+func (s *DeviceStore) Load() ([]SavedDevice, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	doc, rev, err := s.read()
+	return doc.Devices, rev, err
+}
+
+// Save rejects corrupt stores, invalid data and stale revisions. The lock is
+// local to this store instance; other processes can still race the final write.
+func (s *DeviceStore) Save(expected string, devices []SavedDevice) (string, error) {
+	if !validDevices(devices) || len(expected) != 64 {
+		return "", ErrInvalidDevices
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, rev, err := s.read()
+	if err != nil {
+		return "", err
+	}
+	if rev != expected {
+		return "", ErrDeviceConflict
+	}
+	return s.write(devices)
+}
+
+// DecodeDeviceExport accepts the same schema as the web import, with no extra
+// fields or missing/null fields. The caller still validates the combined list.
+func DecodeDeviceExport(data []byte) ([]SavedDevice, error) {
+	if len(data) > deviceMaxBytes || !utf8.Valid(data) {
+		return nil, ErrInvalidDevices
+	}
+	var top map[string]json.RawMessage
+	if decodeDeviceJSON(data, &top) != nil || len(top) != 2 || top["schema"] == nil || top["devices"] == nil {
+		return nil, ErrInvalidDevices
+	}
+	var schema int
+	var rows []json.RawMessage
+	if json.Unmarshal(top["schema"], &schema) != nil || schema != 1 || json.Unmarshal(top["devices"], &rows) != nil || rows == nil || len(rows) > 100 {
+		return nil, ErrInvalidDevices
+	}
+	out := make([]SavedDevice, 0, len(rows))
+	for _, raw := range rows {
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(raw, &obj) != nil || len(obj) != 3 || obj["name"] == nil || obj["host"] == nil || obj["note"] == nil {
+			return nil, ErrInvalidDevices
+		}
+		for _, k := range []string{"name", "host", "note"} {
+			if bytes.Equal(bytes.TrimSpace(obj[k]), []byte("null")) {
+				return nil, ErrInvalidDevices
+			}
+		}
+		var d SavedDevice
+		if decodeDeviceJSON(raw, &d) != nil {
+			return nil, ErrInvalidDevices
+		}
+		out = append(out, d)
+	}
+	if !validDevices(out) {
+		return nil, ErrInvalidDevices
+	}
+	return out, nil
+}
+
+// EncodeDeviceExport produces a web-compatible unencrypted document.
+func EncodeDeviceExport(devices []SavedDevice) ([]byte, error) {
+	if !validDevices(devices) {
+		return nil, ErrInvalidDevices
+	}
+	return json.MarshalIndent(deviceDocument{Schema: 1, Devices: devices}, "", "  ")
+}
