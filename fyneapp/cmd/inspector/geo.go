@@ -345,7 +345,7 @@ func (g *geoPanel) beginWrite(recovery bool) {
 	recoveryNotice := ""
 	if recovery {
 		action = "Восстановить набор и применить GeoNAT"
-		recoveryNotice = "Сначала будут удалены совпадающее неполное служебное allow и его адреса. dst-nat не удаляется. Проверяются не все возможные ссылки на список; внешний клиент не блокируется. Доступ и защита могут измениться. Вторая фаза может не запуститься.\n\n"
+		recoveryNotice = "Сначала будут удалены совпадающее неполное служебное allow и его адреса. dst-nat не удаляется. Проверяются не все возможные ссылки на список; другие сеансы управления роутером не блокируются. Доступ и защита могут измениться. Вторая фаза может не запуститься.\n\n"
 	}
 	message := fmt.Sprintf("Устройство: %s (%s), WAN: %s, идентификатор: %s, ресурс: %s:%s/%s. Страны: %s; подсетей стран: %d; ручные адреса заданы: %t.\n\n%s%sБудут добавлены адреса и правила forward; accept может обойти прежний firewall. Другие пробросы на этот адрес/порт также затрагиваются. Старый набор с тем же идентификатором заменяется; скрипт mti-apply перезаписывается. IPv6 и сервисы роутера не защищены; старые FastTrack-соединения могут сохраняться.\n\nСбой может оставить частичные изменения, отката нет. Резервная копия сохранена и локальный доступ есть?", conn.Host, device.Identity, plan.Request.Geo.WAN, plan.Request.Geo.Resource, plan.Request.Geo.Destination, plan.Request.Geo.Port, plan.Request.Geo.Protocol, strings.Join(plan.Request.Geo.Countries, ", "), len(plan.Request.Geo.CountryPrefixes), strings.TrimSpace(plan.Request.Geo.Manual) != "", warning, recoveryNotice)
 	g.confirming = true
