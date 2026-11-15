@@ -230,3 +230,119 @@ func TestGeoApplyPreflightFailureResetsPreview(t *testing.T) {
 		t.Fatal(g.status.Text)
 	}
 }
+
+func TestGeoRecoveryCancelAndCleanupFailure(t *testing.T) {
+	a := test.NewApp()
+	defer a.Quit()
+	g, _, cb, requests, done := geoApplyFixture(t)
+	recoveries := make(chan mikrotik.GeoRecoveryRequest, 2)
+	g.recoverFn = func(_ context.Context, r mikrotik.GeoRecoveryRequest) (int, error) {
+		recoveries <- r
+		return 0, fmt.Errorf("lost response")
+	}
+	g.recover.OnTapped()
+	(*cb)(false)
+	select {
+	case <-recoveries:
+		t.Fatal("recovery on cancel")
+	default:
+	}
+	g.recover.OnTapped()
+	(*cb)(true)
+	(*cb)(true)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no result")
+	}
+	r := <-recoveries
+	if !r.Acknowledged || r.Geo.Destination != "192.168.88.50" {
+		t.Fatal("recovery request")
+	}
+	select {
+	case <-recoveries:
+		t.Fatal("duplicate cleanup")
+	case <-requests:
+		t.Fatal("apply after failure")
+	default:
+	}
+	if !strings.Contains(g.status.Text, "частичными") || g.plan != nil || g.ack.Checked || g.writing {
+		t.Fatal(g.status.Text)
+	}
+}
+func TestGeoRecoverySuccessThenApply(t *testing.T) {
+	a := test.NewApp()
+	defer a.Quit()
+	g, _, cb, requests, done := geoApplyFixture(t)
+	script := g.plan.Request.Script
+	recoveries := make(chan mikrotik.GeoRecoveryRequest, 1)
+	g.recoverFn = func(_ context.Context, r mikrotik.GeoRecoveryRequest) (int, error) { recoveries <- r; return 106, nil }
+	g.recover.OnTapped()
+	(*cb)(true)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no recovery result")
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no apply result")
+	}
+	<-recoveries
+	req := <-requests
+	if req.Script != script || !strings.Contains(g.status.Text, "очищен") || !strings.Contains(g.status.Text, "не подтверждает защиту") {
+		t.Fatal(g.status.Text)
+	}
+	if g.ack.Checked || g.writing || g.plan != nil {
+		t.Fatal("state not reset")
+	}
+}
+func TestGeoRecoveryChangedInputStopsBeforeApply(t *testing.T) {
+	a := test.NewApp()
+	defer a.Quit()
+	g, _, cb, requests, done := geoApplyFixture(t)
+	g.recoverFn = func(_ context.Context, _ mikrotik.GeoRecoveryRequest) (int, error) { return 106, nil }
+	g.dispatch = func(f func()) { g.destination.SetText("192.168.88.51"); f(); done <- struct{}{} }
+	g.recover.OnTapped()
+	(*cb)(true)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no result")
+	}
+	select {
+	case <-requests:
+		t.Fatal("apply after changed settings")
+	default:
+	}
+	if !strings.Contains(g.status.Text, "новый список не применён") || !strings.Contains(g.status.Text, "Очищено адресов: 106") {
+		t.Fatal(g.status.Text)
+	}
+}
+func TestGeoRecoveryApplyPreflightFailure(t *testing.T) {
+	a := test.NewApp()
+	defer a.Quit()
+	g, _, cb, requests, done := geoApplyFixture(t)
+	g.recoverFn = func(_ context.Context, _ mikrotik.GeoRecoveryRequest) (int, error) { return 106, nil }
+	g.applyFn = func(_ context.Context, r mikrotik.GeoApplyRequest) (string, error) {
+		requests <- r
+		return "", &mikrotik.GeoPreflightError{Cause: fmt.Errorf("NAT missing")}
+	}
+	g.recover.OnTapped()
+	(*cb)(true)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no cleanup")
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no apply")
+	}
+	<-requests
+	if !strings.Contains(g.status.Text, "очищен") || !strings.Contains(g.status.Text, "до записи") || strings.Contains(g.status.Text, "частично") {
+		t.Fatal(g.status.Text)
+	}
+}

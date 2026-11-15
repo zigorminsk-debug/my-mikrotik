@@ -20,7 +20,7 @@ import (
 
 //go:embed payload/MikroTikInspectorFyne.exe
 var payload []byte
-var version = "0.3.0-fyne"
+var version = "0.3.1-fyne"
 
 // The fixed script gets paths via environment variables, never script interpolation.
 // Removal only removes a shortcut still pointing to our executable.

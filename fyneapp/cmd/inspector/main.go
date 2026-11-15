@@ -16,7 +16,7 @@ import (
 	"github.com/zigorminsk-debug/my-mikrotik/mikrotik"
 )
 
-var version = "0.3.0-fyne"
+var version = "0.3.1-fyne"
 
 func main() {
 	a := app.NewWithID("org.mikrotik.inspector.fyne")

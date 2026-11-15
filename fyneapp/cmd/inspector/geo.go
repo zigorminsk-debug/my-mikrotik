@@ -22,7 +22,7 @@ type geoPanel struct {
 	ack, unknown                                   *widget.Check
 	output                                         *widget.Entry
 	status                                         *widget.Label
-	refresh, load, check, preview, apply           *widget.Button
+	refresh, load, check, preview, apply, recover  *widget.Button
 	interfaces                                     []mikrotik.Iface
 	loadedCodes, loadedPrefixes                    []string
 	revision                                       uint64
@@ -31,6 +31,7 @@ type geoPanel struct {
 	planDevice                                     *mikrotik.Info
 	confirm                                        func(string, string, func(bool))
 	applyFn                                        func(context.Context, mikrotik.GeoApplyRequest) (string, error)
+	recoverFn                                      func(context.Context, mikrotik.GeoRecoveryRequest) (int, error)
 	dispatch                                       func(func())
 	get                                            func() (mikrotik.Params, *mikrotik.Info, bool)
 	start                                          func(time.Duration) (context.Context, func() bool)
@@ -47,6 +48,9 @@ func (g *geoPanel) clearResult() {
 	g.planDevice = nil
 	if g.apply != nil {
 		g.apply.Disable()
+	}
+	if g.recover != nil {
+		g.recover.Disable()
 	}
 	g.output.SetText("")
 	g.status.SetText("Параметры изменены: проверку и предпросмотр нужно повторить.")
@@ -83,11 +87,13 @@ func (g *geoPanel) setBusy(b bool) {
 			btn.Disable()
 		}
 	}
-	if g.apply != nil {
-		if available && g.planReady() {
-			g.apply.Enable()
-		} else {
-			g.apply.Disable()
+	for _, btn := range []*widget.Button{g.apply, g.recover} {
+		if btn != nil {
+			if available && g.planReady() {
+				btn.Enable()
+			} else {
+				btn.Disable()
+			}
 		}
 	}
 }
@@ -128,7 +134,7 @@ func (g *geoPanel) run(timeout time.Duration, f func(context.Context) func()) {
 	}()
 }
 func newGeoPanel(get func() (mikrotik.Params, *mikrotik.Info, bool), start func(time.Duration) (context.Context, func() bool), confirm func(string, string, func(bool))) *geoPanel {
-	g := &geoPanel{get: get, start: start, confirm: confirm, applyFn: mikrotik.ApplyGeoNAT, dispatch: fyne.Do}
+	g := &geoPanel{get: get, start: start, confirm: confirm, applyFn: mikrotik.ApplyGeoNAT, recoverFn: mikrotik.RecoverGeoNAT, dispatch: fyne.Do}
 	g.resource = widget.NewEntry()
 	g.resource.SetPlaceHolder("например by")
 	g.destination = widget.NewEntry()
@@ -307,68 +313,124 @@ func newGeoPanel(get func() (mikrotik.Params, *mikrotik.Info, bool), start func(
 		})
 	})
 
-	g.apply = widget.NewButton("Применить GeoNAT…", func() {
-		if g.busy || g.confirming || !g.planReady() {
-			g.status.SetText("Создайте свежий предпросмотр и подтвердите резервную копию.")
-			return
-		}
-		conn, device, ok := g.get()
-		if !ok {
-			return
-		}
-		plan := g.plan
-		rev := g.revision
-		unknown := g.unknown.Checked
-		warning := ""
-		if unknown {
-			warning = "ВНИМАНИЕ: если статус disabled отсутствует, применение продолжится без подтверждения включённого состояния dst-nat. Вы проверили это вручную?\n\n"
-		}
-		message := fmt.Sprintf("Устройство: %s (%s), WAN: %s, идентификатор: %s, ресурс: %s:%s/%s. Страны: %s; подсетей стран: %d; ручные адреса заданы: %t.\n\n%sБудут добавлены адреса и правила forward; accept может обойти прежние ограничения firewall. Другие пробросы на этот адрес/порт также затрагиваются. Старый набор с тем же идентификатором заменяется; служебный скрипт mti-apply перезаписывается. IPv6 и сервисы роутера не защищены; старые FastTrack-соединения могут сохраняться.\n\nСбой может оставить частичные изменения, отката нет. Резервная копия сохранена и локальный доступ есть?", conn.Host, device.Identity, plan.Request.Geo.WAN, plan.Request.Geo.Resource, plan.Request.Geo.Destination, plan.Request.Geo.Port, plan.Request.Geo.Protocol, strings.Join(plan.Request.Geo.Countries, ", "), len(plan.Request.Geo.CountryPrefixes), strings.TrimSpace(plan.Request.Geo.Manual) != "", warning)
-		g.confirming = true
-		g.setBusy(false)
-		g.confirm("Подтвердите применение GeoNAT", message, func(accepted bool) {
-			if !g.confirming {
-				return
-			}
-			g.confirming = false
-			g.setBusy(false)
-			if !accepted {
-				g.status.SetText("Применение отменено. Настройки не изменены.")
-				return
-			}
-			current, currentDevice, currentOK := g.get()
-			if g.busy || !currentOK || current != conn || currentDevice != device || g.revision != rev || g.plan != plan || g.unknown.Checked != unknown || !g.planReady() {
-				g.status.SetText("Данные изменились после подтверждения. Применение не запускалось.")
-				return
-			}
-			req := plan.Request
-			req.Conn = current
-			req.AllowUnknownNATStatus = unknown
-			g.plan = nil
-			g.planDevice = nil
-			g.writing = true
-			g.status.SetText("Проверяем устройство и применяем. Не закрывайте программу…")
-			ctx, finish := g.start(120 * time.Second)
-			go func() {
-				_, err := g.applyFn(ctx, req)
-				g.dispatch(func() {
-					contextErr := ctx.Err()
-					if !finish() {
-						return
-					}
-					g.writing = false
-					g.ack.SetChecked(false)
-					g.unknown.SetChecked(false)
-					g.clearResult()
-					g.setBusy(false)
-					g.status.SetText(viewmodel.GeoApplyOutcome(err, contextErr))
-				})
-			}()
-		})
-	})
+	g.apply = widget.NewButton("Применить GeoNAT…", func() { g.beginWrite(false) })
+	g.recover = widget.NewButton("Восстановить незавершённый набор и применить…", func() { g.beginWrite(true) })
+
 	form := widget.NewForm(widget.NewFormItem("Идентификатор", g.resource), widget.NewFormItem("Внешний WAN", g.wan), widget.NewFormItem("IPv4 ресурса", g.destination), widget.NewFormItem("Внутренний порт", g.port), widget.NewFormItem("Протокол", g.protocol), widget.NewFormItem("Коды стран", g.countries), widget.NewFormItem("Дополнительные IPv4 / CIDR", g.manual))
-	controls := container.NewVBox(wrapLabel("GeoNAT — проверка, предпросмотр и применение с подтверждением. Применение изменяет firewall, возможно частичное выполнение; отката нет. Ресурсом должен быть отдельный хост за роутером, не сервис самого роутера."), g.refresh, form, wrapLabel("Подсети стран загружаются с GitHub (ipverse/RIR); сервис увидит ваш публичный IP. Коды стран не гарантируют фактическое местоположение. Можно указать только свои IPv4/CIDR."), g.load, g.unknown, g.ack, g.check, g.preview, g.apply, g.status)
+	controls := container.NewVBox(wrapLabel("GeoNAT — проверка, предпросмотр и применение с подтверждением. Применение изменяет firewall, возможно частичное выполнение; отката нет. Ресурсом должен быть отдельный хост за роутером, не сервис самого роутера."), g.refresh, form, wrapLabel("Подсети стран загружаются с GitHub (ipverse/RIR); сервис увидит ваш публичный IP. Коды стран не гарантируют фактическое местоположение. Можно указать только свои IPv4/CIDR."), g.load, g.unknown, g.ack, g.check, g.preview, g.apply, g.recover, g.status)
 	g.root = container.NewHSplit(container.NewVScroll(controls), g.output)
 	g.setBusy(false)
 	return g
+}
+
+// beginWrite guards both the single apply and the explicitly requested recovery.
+// Recovery and apply are separate non-atomic operations; never retry either.
+func (g *geoPanel) beginWrite(recovery bool) {
+	if g.busy || g.confirming || !g.planReady() {
+		g.status.SetText("Создайте свежий предпросмотр и подтвердите резервную копию.")
+		return
+	}
+	conn, device, ok := g.get()
+	if !ok {
+		return
+	}
+	plan := g.plan
+	rev := g.revision
+	unknown := g.unknown.Checked
+	warning := ""
+	if unknown {
+		warning = "ВНИМАНИЕ: если статус disabled отсутствует, применение продолжится без подтверждения включённого состояния dst-nat. Вы проверили это вручную?\n\n"
+	}
+	action := "Применить GeoNAT"
+	recoveryNotice := ""
+	if recovery {
+		action = "Восстановить набор и применить GeoNAT"
+		recoveryNotice = "Сначала будут удалены совпадающее неполное служебное allow и его адреса. dst-nat не удаляется. Проверяются не все возможные ссылки на список; внешний клиент не блокируется. Доступ и защита могут измениться. Вторая фаза может не запуститься.\n\n"
+	}
+	message := fmt.Sprintf("Устройство: %s (%s), WAN: %s, идентификатор: %s, ресурс: %s:%s/%s. Страны: %s; подсетей стран: %d; ручные адреса заданы: %t.\n\n%s%sБудут добавлены адреса и правила forward; accept может обойти прежний firewall. Другие пробросы на этот адрес/порт также затрагиваются. Старый набор с тем же идентификатором заменяется; скрипт mti-apply перезаписывается. IPv6 и сервисы роутера не защищены; старые FastTrack-соединения могут сохраняться.\n\nСбой может оставить частичные изменения, отката нет. Резервная копия сохранена и локальный доступ есть?", conn.Host, device.Identity, plan.Request.Geo.WAN, plan.Request.Geo.Resource, plan.Request.Geo.Destination, plan.Request.Geo.Port, plan.Request.Geo.Protocol, strings.Join(plan.Request.Geo.Countries, ", "), len(plan.Request.Geo.CountryPrefixes), strings.TrimSpace(plan.Request.Geo.Manual) != "", warning, recoveryNotice)
+	g.confirming = true
+	g.setBusy(false)
+	g.confirm(action, message, func(accepted bool) {
+		if !g.confirming {
+			return
+		}
+		g.confirming = false
+		g.setBusy(false)
+		if !accepted {
+			g.status.SetText("Операция отменена. Настройки не изменены.")
+			return
+		}
+		current, currentDevice, currentOK := g.get()
+		if g.busy || !currentOK || current != conn || currentDevice != device || g.revision != rev || g.plan != plan || g.unknown.Checked != unknown || !g.planReady() {
+			g.status.SetText("Данные изменились после подтверждения. Операция не запускалась.")
+			return
+		}
+		req := plan.Request
+		req.Conn = current
+		req.AllowUnknownNATStatus = unknown
+		g.plan = nil
+		g.planDevice = nil
+		g.writing = true
+		timeout := 120 * time.Second
+		if recovery {
+			timeout = 300 * time.Second
+		}
+		ctx, finish := g.start(timeout)
+		finishOperation := func(message string) {
+			if !finish() {
+				return
+			}
+			g.writing = false
+			g.ack.SetChecked(false)
+			g.unknown.SetChecked(false)
+			g.clearResult()
+			g.setBusy(false)
+			g.status.SetText(message)
+		}
+		apply := func(cleaned bool) {
+			g.status.SetText("Проверяем устройство и применяем. Не закрывайте программу…")
+			go func() {
+				applyCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+				_, err := g.applyFn(applyCtx, req)
+				ctxErr := applyCtx.Err()
+				cancel()
+				g.dispatch(func() {
+					msg := viewmodel.GeoApplyOutcome(err, ctxErr)
+					if cleaned {
+						msg = "Неполный набор очищен. " + msg
+					}
+					finishOperation(msg)
+				})
+			}()
+		}
+		if !recovery {
+			apply(false)
+			return
+		}
+		g.status.SetText("Проверяем и очищаем неполный набор; после этого повторно проверим и применим. Не закрывайте программу…")
+		recoveryReq := mikrotik.GeoRecoveryRequest{Conn: current, Device: req.Device, Geo: req.Geo, Acknowledged: true}
+		go func() {
+			recoverCtx, cancel := context.WithTimeout(ctx, 180*time.Second)
+			count, err := g.recoverFn(recoverCtx, recoveryReq)
+			ctxErr := recoverCtx.Err()
+			cancel()
+			g.dispatch(func() {
+				if err != nil || ctxErr != nil {
+					detail := "сбой или тайм-аут"
+					if err != nil {
+						detail = err.Error()
+					}
+					finishOperation("Восстановление не завершено: " + detail + ". Изменения могли быть частичными; проверьте firewall и список адресов перед повтором.")
+					return
+				}
+				live, liveDevice, _ := g.get()
+				age := time.Since(req.GeneratedAt)
+				if ctx.Err() != nil || g.revision != rev || live != conn || liveDevice != device || !g.ack.Checked || g.unknown.Checked != unknown || age < 0 || age > 10*time.Minute {
+					finishOperation(fmt.Sprintf("Очищено адресов: %d. Данные или время изменились; новый список не применён. Проверьте firewall до продолжения.", count))
+					return
+				}
+				apply(true)
+			})
+		}()
+	})
 }
