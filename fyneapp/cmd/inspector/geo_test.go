@@ -38,8 +38,9 @@ func TestGeoPanelInvalidatesAndGates(t *testing.T) {
 	g.setBusy(false)
 	g.interfaces = []mikrotik.Iface{{Name: "ether1"}}
 	g.loadedCodes = []string{"by"}
+	g.ack.SetChecked(true)
 	g.reset()
-	if len(g.interfaces) != 0 || len(g.loadedCodes) != 0 || g.output.Text != "" {
+	if len(g.interfaces) != 0 || len(g.loadedCodes) != 0 || g.output.Text != "" || g.ack.Checked {
 		t.Fatal("device change left old data")
 	}
 }

@@ -46,6 +46,8 @@ func (g *geoPanel) reset() {
 	g.interfaces = nil
 	g.loadedCodes = nil
 	g.loadedPrefixes = nil
+	// Acknowledgement for one router is not transferable to a new session.
+	g.ack.SetChecked(false)
 	g.wan.Options = nil
 	g.wan.ClearSelected()
 	g.wan.Refresh()
