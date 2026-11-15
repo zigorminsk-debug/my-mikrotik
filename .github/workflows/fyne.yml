@@ -33,6 +33,10 @@ jobs:
           [IO.File]::WriteAllBytes("$PWD/cmd/setup/payload/MikroTikInspectorFyne.exe", [byte[]](77,90))
           go mod tidy
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($f in @('go.mod','go.sum')) {
+            $base64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD/$f"))
+            for ($i=0; $i -lt $base64.Length; $i+=1500) { $len=[Math]::Min(1500, $base64.Length-$i); Write-Host ("::notice::LOCK:$f`:$i`:" + $base64.Substring($i,$len)) }
+          }
           go test -tags ci ./...
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go vet -tags ci ./...
@@ -44,17 +48,23 @@ jobs:
           path: |
             fyneapp/go.mod
             fyneapp/go.sum
-      - name: Собрать приложение и Fyne-установщик
+      - name: Собрать Fyne приложение
+        working-directory: fyneapp
+        shell: pwsh
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          go build -trimpath -ldflags "-s -w -H windowsgui" -o cmd/setup/payload/MikroTikInspectorFyne.exe ./cmd/inspector 2>&1 | Tee-Object -FilePath ../fyne-build-error.txt
+          if ($LASTEXITCODE -ne 0) { Get-Content ../fyne-build-error.txt | ForEach-Object { Write-Host "::error::$_" }; exit 1 }
+      - name: Собрать Fyne установщик
         working-directory: fyneapp
         shell: pwsh
         env:
           CGO_ENABLED: '1'
         run: |
           New-Item -ItemType Directory -Force ../dist | Out-Null
-          go build -trimpath -ldflags "-s -w -H windowsgui" -o cmd/setup/payload/MikroTikInspectorFyne.exe ./cmd/inspector
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          go build -trimpath -ldflags "-s -w -H windowsgui" -o ../dist/mikrotik-inspector-v0.1.0-fyne-setup.exe ./cmd/setup
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go build -trimpath -ldflags "-s -w -H windowsgui" -o ../dist/mikrotik-inspector-v0.1.0-fyne-setup.exe ./cmd/setup 2>&1 | Tee-Object -FilePath ../fyne-setup-error.txt
+          if ($LASTEXITCODE -ne 0) { Get-Content ../fyne-setup-error.txt | ForEach-Object { Write-Host "::error::$_" }; exit 1 }
           $p=Start-Process -FilePath ../dist/mikrotik-inspector-v0.1.0-fyne-setup.exe -ArgumentList '--verify-payload' -PassThru -Wait
           if ($p.ExitCode -ne 0) { throw "Проверка встроенного EXE не прошла: $($p.ExitCode)" }
           Get-FileHash ../dist/mikrotik-inspector-v0.1.0-fyne-setup.exe -Algorithm SHA256 | Format-List
