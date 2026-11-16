@@ -21,7 +21,7 @@ import (
 	"github.com/zigorminsk-debug/my-mikrotik/mikrotik"
 )
 
-var version = "0.4.1-fyne"
+var version = "0.5.0-fyne"
 
 func main() {
 	a := app.NewWithID("org.mikrotik.inspector.fyne")
@@ -56,6 +56,7 @@ func main() {
 	var busy bool
 	var connect, connectDefault, snapshot, copyButton *widget.Button
 	var geo *geoPanel
+	var builder *builderPanel
 	setBusy := func(b bool) {
 		busy = b
 		for _, e := range []*widget.Entry{host, port, user, password} {
@@ -97,6 +98,9 @@ func main() {
 		if geo != nil {
 			geo.setBusy(b)
 		}
+		if builder != nil {
+			builder.setBusy(b)
+		}
 	}
 	invalidate := func() {
 		seq++
@@ -105,6 +109,9 @@ func main() {
 		if geo != nil {
 			geo.reset()
 			geo.setBusy(false)
+		}
+		if builder != nil {
+			builder.reset()
 		}
 		if cancel != nil {
 			cancel()
@@ -161,6 +168,9 @@ func main() {
 		if geo != nil {
 			geo.reset()
 		}
+		if builder != nil {
+			builder.reset()
+		}
 		copyButton.Disable()
 		out.SetText("")
 		setBusy(true)
@@ -192,6 +202,9 @@ func main() {
 					snapshot.Enable()
 				}
 				status.SetText("Подключено. Информация прочитана; настройки не изменены.")
+				if builder != nil {
+					builder.loadInterfaces()
+				}
 			})
 		}()
 	})
@@ -300,8 +313,13 @@ func main() {
 			f.Show()
 		})
 	information := container.NewVScroll(centeredPage(container.NewPadded(container.NewVBox(connectionCard, devices.root, reportCard))))
-	constructor := container.NewBorder(section("КОНСТРУКТОР — ПЕРЕНОС НЕ ЗАВЕРШЁН", wrapLabel("Сейчас доступен только GeoNAT. LAN/DHCP, WAN, VPN и остальные разделы ещё не перенесены; для них используйте HTML-версию.")), nil, nil, nil, geo.root)
-	tabs = container.NewAppTabs(container.NewTabItem("Информация", information), container.NewTabItem("Конструктор · GeoNAT", constructor))
+	builder = newBuilderPanel(getConnection, startGeo, func(text string) { w.Clipboard().SetContent(text) }, func(cb func(fyne.URIWriteCloser, error)) {
+		f := dialog.NewFileSave(cb, w)
+		f.SetFileName("mikrotik-config.rsc")
+		f.Show()
+	})
+	constructor := container.NewAppTabs(container.NewTabItem("Меню RouterOS", builder.root), container.NewTabItem("GeoNAT", geo.root))
+	tabs = container.NewAppTabs(container.NewTabItem("Информация", information), container.NewTabItem("Конструктор", constructor))
 	w.SetContent(container.NewBorder(appHeader(version), nil, nil, nil, tabs))
 	w.SetCloseIntercept(func() {
 		if geo != nil && (geo.writing || geo.confirming) {
