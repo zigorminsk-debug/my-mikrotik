@@ -14,16 +14,18 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/zigorminsk-debug/my-mikrotik/fyneapp/internal/viewmodel"
 	"github.com/zigorminsk-debug/my-mikrotik/internal/server"
 	"github.com/zigorminsk-debug/my-mikrotik/mikrotik"
 )
 
-var version = "0.4.0-fyne"
+var version = "0.4.1-fyne"
 
 func main() {
 	a := app.NewWithID("org.mikrotik.inspector.fyne")
+	a.Settings().SetTheme(inspectorTheme{theme.LightTheme()})
 	w := a.NewWindow("MikroTik Inspector — Fyne " + version)
 	w.Resize(fyne.NewSize(960, 720))
 	host := widget.NewEntry()
@@ -52,7 +54,7 @@ func main() {
 	var cancel context.CancelFunc
 	var seq uint64
 	var busy bool
-	var connect, snapshot, copyButton *widget.Button
+	var connect, connectDefault, snapshot, copyButton *widget.Button
 	var geo *geoPanel
 	setBusy := func(b bool) {
 		busy = b
@@ -71,6 +73,9 @@ func main() {
 			history.Disable()
 			lte.Disable()
 			connect.Disable()
+			if connectDefault != nil {
+				connectDefault.Disable()
+			}
 			snapshot.Disable()
 		} else {
 			protocol.Enable()
@@ -80,6 +85,9 @@ func main() {
 			history.Enable()
 			lte.Enable()
 			connect.Enable()
+			if connectDefault != nil {
+				connectDefault.Enable()
+			}
 			if info != nil && info.Protocol != "mac" {
 				snapshot.Enable()
 			} else {
@@ -187,6 +195,13 @@ func main() {
 			})
 		}()
 	})
+	connectDefault = widget.NewButton("Подключиться к новому MikroTik", func() {
+		if busy || (geo != nil && (geo.confirming || geo.writing)) {
+			return
+		}
+		setFactoryConnection(host, port, user, password, protocol, tls)
+		connect.OnTapped()
+	})
 	snapshot = widget.NewButton("Собрать снимок", func() {
 		if busy || info == nil {
 			return
@@ -240,9 +255,12 @@ func main() {
 	leases.OnChanged = clearReport
 	history.OnChanged = clearReport
 	lte.OnChanged = clearReport
-	form := widget.NewForm(widget.NewFormItem("Адрес", host), widget.NewFormItem("Порт", port), widget.NewFormItem("Логин", user), widget.NewFormItem("Пароль", password), widget.NewFormItem("Протокол", protocol))
-	controls := container.NewVBox(widget.NewLabelWithStyle("Подключение к MikroTik", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), form, tls, widget.NewLabel("Без TLS пароль и данные могут передаваться открытым текстом. TLS в этой версии не проверяет сертификат роутера."), connect, widget.NewSeparator(), widget.NewLabel("Необязательные разделы снимка:"), topo, leases, history, lte, snapshot, copyButton, status)
-	out.SetMinRowsVisible(18)
+	connect.Importance = widget.HighImportance
+	snapshot.Importance = widget.HighImportance
+	fields := container.NewGridWithColumns(5, field("Адрес роутера или MAC", host), field("Порт (по умолчанию)", port), field("Логин", user), field("Пароль", password), field("Протокол", protocol))
+	connectionCard := section("ПОДКЛЮЧЕНИЕ К РОУТЕРУ", fields, container.NewHBox(tls, connect, connectDefault), wrapLabel("Без TLS пароль и данные могут передаваться открытым текстом. TLS в этой версии не проверяет сертификат роутера."), status)
+	out.SetMinRowsVisible(14)
+	reportCard := section("ОТЧЁТ И СНИМОК СЕТИ", wrapLabel("Только чтение. Снимок может содержать частные адреса, имена и маршруты."), container.NewGridWithColumns(2, topo, leases, history, lte), container.NewHBox(snapshot, copyButton), reportViewer(out))
 	getConnection := func() (mikrotik.Params, *mikrotik.Info, bool) { return connected, info, info != nil && !busy }
 	startGeo := func(timeout time.Duration) (context.Context, func() bool) {
 		seq++
@@ -281,8 +299,10 @@ func main() {
 			f.SetFileName("mikrotik-devices.json")
 			f.Show()
 		})
-	tabs = container.NewAppTabs(container.NewTabItem("Диагностика", container.NewHSplit(container.NewVScroll(controls), out)), container.NewTabItem("Устройства", devices.root), container.NewTabItem("GeoNAT", geo.root))
-	w.SetContent(tabs)
+	information := container.NewVScroll(centeredPage(container.NewPadded(container.NewVBox(connectionCard, devices.root, reportCard))))
+	constructor := container.NewBorder(section("КОНСТРУКТОР — ПЕРЕНОС НЕ ЗАВЕРШЁН", wrapLabel("Сейчас доступен только GeoNAT. LAN/DHCP, WAN, VPN и остальные разделы ещё не перенесены; для них используйте HTML-версию.")), nil, nil, nil, geo.root)
+	tabs = container.NewAppTabs(container.NewTabItem("Информация", information), container.NewTabItem("Конструктор · GeoNAT", constructor))
+	w.SetContent(container.NewBorder(appHeader(version), nil, nil, nil, tabs))
 	w.SetCloseIntercept(func() {
 		if geo != nil && (geo.writing || geo.confirming) {
 			dialog.ShowInformation("GeoNAT", "Завершите подтверждение или дождитесь результата применения; отключение питания или аварийное завершение могут оставить частичные изменения.", w)
@@ -311,4 +331,14 @@ func fillSavedDevice(address string, host, password *widget.Entry, protocol *wid
 		protocol.SetSelected(*previous)
 	}
 	invalidate()
+}
+
+// Matches the explicit factory-connection action from the HTML interface.
+func setFactoryConnection(host, port, user, password *widget.Entry, protocol *widget.Select, tls *widget.Check) {
+	host.SetText("192.168.88.1")
+	port.SetText("")
+	user.SetText("admin")
+	password.SetText("")
+	protocol.SetSelected("auto")
+	tls.SetChecked(false)
 }

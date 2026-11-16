@@ -59,15 +59,15 @@ jobs:
           CGO_ENABLED: '1'
         run: |
           New-Item -ItemType Directory -Force ../dist | Out-Null
-          go build -trimpath -ldflags "-s -w -H windowsgui" -o ../dist/mikrotik-inspector-v0.4.0-fyne-setup.exe ./cmd/setup 2>&1 | Tee-Object -FilePath ../fyne-setup-error.txt
+          go build -trimpath -ldflags "-s -w -H windowsgui" -o ../dist/mikrotik-inspector-v0.4.1-fyne-setup.exe ./cmd/setup 2>&1 | Tee-Object -FilePath ../fyne-setup-error.txt
           if ($LASTEXITCODE -ne 0) { Get-Content ../fyne-setup-error.txt | ForEach-Object { Write-Host "::error::$_" }; exit 1 }
-          $p=Start-Process -FilePath ../dist/mikrotik-inspector-v0.4.0-fyne-setup.exe -ArgumentList '--verify-payload' -PassThru -Wait
+          $p=Start-Process -FilePath ../dist/mikrotik-inspector-v0.4.1-fyne-setup.exe -ArgumentList '--verify-payload' -PassThru -Wait
           if ($p.ExitCode -ne 0) { throw "Проверка встроенного EXE не прошла: $($p.ExitCode)" }
-          Get-FileHash ../dist/mikrotik-inspector-v0.4.0-fyne-setup.exe -Algorithm SHA256 | Format-List
+          Get-FileHash ../dist/mikrotik-inspector-v0.4.1-fyne-setup.exe -Algorithm SHA256 | Format-List
       - name: Установщик Fyne (экспериментальная версия)
         uses: actions/upload-artifact@v7
         with:
-          name: mikrotik-inspector-v0.4.0-fyne-windows-setup
-          path: dist/mikrotik-inspector-v0.4.0-fyne-setup.exe
+          name: mikrotik-inspector-v0.4.1-fyne-windows-setup
+          path: dist/mikrotik-inspector-v0.4.1-fyne-setup.exe
           if-no-files-found: error
           retention-days: 14

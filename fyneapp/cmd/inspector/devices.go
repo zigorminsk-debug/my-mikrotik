@@ -106,8 +106,9 @@ func newDevicesPanel(store deviceStore, use func(string) bool, confirm func(stri
 	d.refresh = widget.NewButton("Обновить список", d.reload)
 	d.importButton = widget.NewButton("Добавить из JSON…", d.importFile)
 	d.exportButton = widget.NewButton("Экспорт JSON…", d.exportFile)
-	form := widget.NewForm(widget.NewFormItem("Запись", d.selectDevice), widget.NewFormItem("Название", d.name), widget.NewFormItem("Адрес или MAC", d.host), widget.NewFormItem("Заметка", d.note))
-	d.root = container.NewVScroll(container.NewVBox(wrapLabel("Локальный список: название, адрес и заметка. Пароли не сохраняются автоматически; не вводите секреты в эти поля. Файлы не зашифрованы. Адрес может устареть и не подтверждает устройство."), form, container.NewHBox(d.add, d.update, d.remove), container.NewHBox(d.use, d.refresh), container.NewHBox(d.importButton, d.exportButton), wrapLabel("Подстановка очищает пароль и не подключается. Проверьте логин, порт, протокол и TLS. Импорт добавляет записи, не заменяя список; повторные названия отклоняются. При экспорте не выбирайте рабочий файл списка или важный файл: он может быть перезаписан."), d.status))
+	form := container.NewGridWithColumns(4, field("Сохранённая запись", d.selectDevice), field("Название", d.name), field("Адрес роутера или MAC", d.host), field("Заметка (без паролей)", d.note))
+	d.add.Importance = widget.HighImportance
+	d.root = section("СОХРАНЁННЫЕ УСТРОЙСТВА", wrapLabel("Локальный список без паролей. Не записывайте секреты: файл и экспорт не зашифрованы. Адрес может устареть и не подтверждает личность устройства."), form, container.NewHBox(d.add, d.update, d.remove, d.use, d.refresh), container.NewHBox(d.exportButton, d.importButton), wrapLabel("Подстановка очищает пароль и не подключается. Проверьте логин, порт, протокол и TLS. Импорт добавляет записи, не заменяя список; повторные названия отклоняются. При экспорте не выбирайте рабочий файл списка или важный файл: он может быть перезаписан."), d.status)
 	d.reload()
 	return d
 }

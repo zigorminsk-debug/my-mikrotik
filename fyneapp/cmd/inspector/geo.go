@@ -318,7 +318,7 @@ func newGeoPanel(get func() (mikrotik.Params, *mikrotik.Info, bool), start func(
 
 	form := widget.NewForm(widget.NewFormItem("Идентификатор", g.resource), widget.NewFormItem("Внешний WAN", g.wan), widget.NewFormItem("IPv4 ресурса", g.destination), widget.NewFormItem("Внутренний порт", g.port), widget.NewFormItem("Протокол", g.protocol), widget.NewFormItem("Коды стран", g.countries), widget.NewFormItem("Дополнительные IPv4 / CIDR", g.manual))
 	controls := container.NewVBox(wrapLabel("GeoNAT — проверка, предпросмотр и применение с подтверждением. Применение изменяет firewall, возможно частичное выполнение; отката нет. Ресурсом должен быть отдельный хост за роутером, не сервис самого роутера."), g.refresh, form, wrapLabel("Подсети стран загружаются с GitHub (ipverse/RIR); сервис увидит ваш публичный IP. Коды стран не гарантируют фактическое местоположение. Можно указать только свои IPv4/CIDR."), g.load, g.unknown, g.ack, g.check, g.preview, g.apply, g.recover, g.status)
-	g.root = container.NewHSplit(container.NewVScroll(controls), g.output)
+	g.root = container.NewHSplit(container.NewVScroll(section("БЕЛЫЙ СПИСОК ДЛЯ ПРОБРОШЕННОГО РЕСУРСА", controls)), reportViewer(g.output))
 	g.setBusy(false)
 	return g
 }
